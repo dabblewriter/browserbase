@@ -1,5 +1,7 @@
 # BrowserDB
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/dabblewriter/browserdb.svg)](https://greenkeeper.io/)
+
 BrowserDB is a wrapper around the IndexedDB browser database that makes it easier to use. It provides
 * a Promise-based API using native browser promises (provide your own polyfill for IE 11)
 * easy versioning with indexes
