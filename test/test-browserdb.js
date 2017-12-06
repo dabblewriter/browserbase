@@ -182,13 +182,78 @@ describe('BrowserDB', () => {
   it('should allow one transaction for many puts', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      expect(db.foo._trans('readonly').transaction).to.not.equal(db.current);
+      expect(db.foo._transStore('readonly').transaction).to.not.equal(db.current);
       db.start();
       db.foo.put({ key: 'test1' });
       db.foo.put({ key: 'test2' });
       db.foo.put({ key: 'test3' });
-      expect(db.foo._trans('readonly').transaction).to.equal(db.current);
+      expect(db.foo._transStore('readonly').transaction).to.equal(db.current);
       return db.commit();
+    });
+  });
+
+  it('should not report success if the transaction fails', () => {
+    db.version(1, { foo: 'key, &unique' });
+    let success1;
+    let success2;
+
+    return db.open().then(() => {
+      db.start();
+      db.foo.add({ key: 'test1' }).then(id => {
+        success1 = true;
+      }, err => {
+        success1 = false;
+      });
+      db.foo.put({ key: 'test2', unique: 10 }).then(id => {
+        success2 = true;
+      }, err => {
+        success2 = false;
+      });
+      db.foo.add({ key: 'test1' });
+      db.foo.put({ key: 'test3', unique: 10 });
+      return db.commit().catch(() => {
+        expect(success1, 'add did not give an error').to.be.false;
+        expect(success2, 'put did not give an error').to.be.false;
+      }).then(() => {
+        return db.foo.get('test1');
+      }).then(obj => {
+        expect(obj).to.be.undefined;
+      });
+    });
+  });
+
+  it('should not report to finish if the transaction fails', () => {
+    db.version(1, { foo: 'key, &unique' });
+    let success = false;
+
+    return db.open().then(() => {
+      db.start();
+      db.foo.add({ key: 'test1', unique: 10 });
+      db.foo.add({ key: 'test2', unique: 11 });
+      db.foo.add({ key: 'test3', unique: 12 });
+      return db.commit().then(() => {
+        db.foo.on('change', (obj, key, from) => {
+          success = true;
+        });
+        return db.foo.where('key').update(obj => {
+          if (obj.key === 'test2') {
+            obj.unique = 15;
+            return obj;
+          } else if (obj.key === 'test3') {
+            obj.unique = 10;
+            return obj;
+          }
+        });
+      }).catch(() => {}).then(() => {
+        expect(success).to.be.false;
+        return db.foo.getAll().then(res => {
+          expect(res).to.deep.equal([
+            { key: 'test1', unique: 10 },
+            { key: 'test2', unique: 11 },
+            { key: 'test3', unique: 12 }
+          ]);
+        });
+      });
     });
   });
 
@@ -227,7 +292,7 @@ describe('BrowserDB', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').gte('test2').lt('test5').getAll().then(objects => {
+        return db.foo.where('key').startAt('test2').endBefore('test5').getAll().then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test2' },
             { key: 'test3' },
@@ -249,7 +314,7 @@ describe('BrowserDB', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').gt('test2').lte('test5').deleteAll().then(() => db.foo.getAll()).then(objects => {
+        return db.foo.where('key').startAfter('test2').endAt('test5').deleteAll().then(() => db.foo.getAll()).then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test1' },
             { key: 'test2' },
@@ -271,7 +336,7 @@ describe('BrowserDB', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').gte('test2').lte('test5').update(obj => {
+        return db.foo.where('key').startAt('test2').endAt('test5').update(obj => {
           if (obj.key === 'test2') return null;
           if (obj.key === 'test5') return;
           obj.name = obj.key;

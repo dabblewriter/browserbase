@@ -140,12 +140,12 @@ export default class BrowserDB extends EventDispatcher {
    */
   start(storeNames, mode = 'readwrite') {
     if (!storeNames) storeNames = this.db.objectStoreNames;
-    this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
+    let trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
     return this.current.promise = requestToPromise(this.current).then(result => {
-      this.current = null;
+      if (this.current === trans) this.current = null;
       return result;
     }, err => {
-      this.current = null;
+      if (this.current === trans) this.current = null;
       return Promise.reject(err);
     });
   }
@@ -196,11 +196,9 @@ class ObjectStore extends EventDispatcher {
     this.keyPath = keyPath;
   }
 
-  _trans(mode, index) {
+  _transStore(mode, index) {
     let trans = this.db.current || this.db.db.transaction(this.name, mode);
-    let store = trans.objectStore(this.name);
-    if (index) return store.index(index);
-    return store;
+    return trans.objectStore(this.name);
   }
 
   /**
@@ -209,7 +207,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}  Resolves with the object being retreived
    */
   get(key) {
-    return requestToPromise(this._trans('readonly').get(key));
+    return requestToPromise(this._transStore('readonly').get(key));
   }
 
   /**
@@ -217,7 +215,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise} Resolves with an array of objects
    */
   getAll() {
-    return requestToPromise(this._trans('readonly').getAll());
+    return requestToPromise(this._transStore('readonly').getAll());
   }
 
   /**
@@ -227,8 +225,10 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}
    */
   add(obj, key) {
-    return requestToPromise(this._trans('readwrite').add(obj, key)).then(key => {
+    let store = this._transStore('readwrite');
+    return requestToPromise(store.add(obj, key), store.transaction).then(key => {
       this.db.dispatchChange(this, obj, key);
+      return key;
     });
   }
 
@@ -238,11 +238,11 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}
    */
   bulkAdd(array) {
-    let trans = this._trans('readwrite');
+    let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
-      return requestToPromise(trans.add(obj)).then(key => {
+      return requestToPromise(store.add(obj), store.transaction).then(key => {
         this.db.dispatchChange(this, obj, key);
-      })
+      });
     }));
   }
 
@@ -253,8 +253,10 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}
    */
   put(obj, key) {
-    return requestToPromise(this._trans('readwrite').put(obj, key)).then(key => {
+    let store = this._transStore('readwrite');
+    return requestToPromise(store.put(obj, key), store.transaction).then(key => {
       this.db.dispatchChange(this, obj, key);
+      return key;
     });
   }
 
@@ -264,9 +266,9 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}
    */
   bulkPut(array) {
-    let trans = this._trans('readwrite');
+    let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
-      return requestToPromise(trans.put(obj)).then(key => {
+      return requestToPromise(store.put(obj), store.transaction).then(key => {
         this.db.dispatchChange(this, obj, key);
       });
     }));
@@ -278,7 +280,8 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}
    */
   delete(key) {
-    return requestToPromise(this._trans('readwrite').delete(key)).then(() => {
+    let store = this._transStore('readwrite');
+    return requestToPromise(store.delete(key), store.transaction).then(() => {
       this.db.dispatchChange(this, null, key);
     });
   }
@@ -295,11 +298,11 @@ class ObjectStore extends EventDispatcher {
   /**
    * Use to get a subset of items from the store by id or index. Returns a Where object to allow setting the range and
    * limit.
-   * @param  {String} field The key or index that will be used to retreive the range of objects
+   * @param  {String} index The key or index that will be used to retreive the range of objects
    * @return {Where}        A Where instance associated with this object store
    */
-  where(field) {
-    return new Where(this, field === this.keyPath ? '' : field);
+  where(index = '') {
+    return new Where(this, index === this.keyPath ? '' : index);
   }
 }
 
@@ -325,7 +328,7 @@ class Where {
    * @param  {mixed} value The lower bound
    * @return {Where}       Reference to this
    */
-  gt(value) {
+  startAfter(value) {
     this._lower = value;
     this._lowerOpen = true;
     return this;
@@ -336,7 +339,7 @@ class Where {
    * @param  {mixed} value The lower bound
    * @return {Where}       Reference to this
    */
-  gte(value) {
+  startAt(value) {
     this._lower = value;
     this._lowerOpen = false;
     return this;
@@ -347,7 +350,7 @@ class Where {
    * @param  {mixed} value The upper bound
    * @return {Where}       Reference to this
    */
-  lt(value) {
+  endBefore(value) {
     this._upper = value;
     this._upperOpen = true;
     return this;
@@ -358,7 +361,7 @@ class Where {
    * @param  {mixed} value The upper bound
    * @return {Where}       Reference to this
    */
-  lte(value) {
+  endAt(value) {
     this._upper = value;
     this._upperOpen = false;
     return this;
@@ -415,7 +418,9 @@ class Where {
    */
   getAll() {
     let range = this.toRange();
-    return requestToPromise(this.store._trans('readonly', this.index).getAll(range, this._limit));
+    let store = this.store._transStore('readonly');
+    let source = this.index ? store.index(this.index) : store;
+    return requestToPromise(source.getAll(range, this._limit));
   }
 
   /**
@@ -432,9 +437,9 @@ class Where {
    */
   deleteAll() {
     // Uses a cursor to delete so that each item can get a change event dispatched for it
-    return this.map((object, cursor) => {
+    return this.map((object, cursor, trans) => {
       let key = cursor.primaryKey;
-      return requestToPromise(cursor.delete()).then(() => {
+      return requestToPromise(cursor.delete(), trans).then(() => {
         this.store.db.dispatchChange(this.store, null, key);
       });
     }, 'readwrite').then(promises => Promise.all(promises)).then(() => {});
@@ -447,7 +452,7 @@ class Where {
    * @return {Promise}           Resolves without result when finished
    */
   update(iterator) {
-    return this.map((object, cursor) => {
+    return this.map((object, cursor, trans) => {
       let key = cursor.primaryKey;
       let newValue = iterator(object, cursor);
       if (newValue === null) {
@@ -455,7 +460,7 @@ class Where {
           this.store.db.dispatchChange(this.store, null, key);
         });
       } else if (newValue !== undefined) {
-        return requestToPromise(cursor.update(newValue)).then(() => {
+        return requestToPromise(cursor.update(newValue), trans).then(() => {
           this.store.db.dispatchChange(this.store, newValue, key);
         });
       } else {
@@ -472,11 +477,13 @@ class Where {
   forEach(iterator, mode = 'readonly', direction = 'next') {
     return new Promise((resolve, reject) => {
       let range = this.toRange();
-      let request = this.store._trans(mode, this.index).openCursor(range, direction);
+      let store = this.store._transStore(mode);
+      let source = this.index ? store.index(this.index) : store;
+      let request = source.openCursor(range, direction);
       request.onsuccess = event => {
         var cursor = event.target.result;
         if (cursor) {
-          iterator(cursor.value, cursor);
+          iterator(cursor.value, cursor, store.transaction);
           cursor.continue();
         } else {
           resolve(event.target.result);
@@ -493,20 +500,28 @@ class Where {
    */
   map(iterator, mode = 'readonly', direction = 'next') {
     let results = [];
-    return this.forEach((object, cursor) => {
-      results.push(iterator(object, cursor));
+    return this.forEach((object, cursor, trans) => {
+      results.push(iterator(object, cursor, trans));
     }, mode, direction).then(() => results);
   }
 }
 
 
 
-function requestToPromise(request) {
+function requestToPromise(request, transaction) {
   return new Promise((resolve, reject) => {
-    request.onerror = errorHandler(reject);
-    if (request.onsuccess === null) request.onsuccess = successHandler(resolve);
+    if (transaction) {
+      if (!transaction.promise) transaction.promise = requestToPromise(transaction);
+      transaction.promise = transaction.promise.then(() => resolve(request.result), err => {
+        reject(request.error || err);
+        return Promise.reject(err);
+      });
+    } else if (request.onsuccess === null) {
+      request.onsuccess = successHandler(resolve);
+    }
     if (request.oncomplete === null) request.oncomplete = successHandler(resolve);
-    if (request.onabort === null) request.onabort = errorHandler(() => reject(new Error('Abort')));
+    if (request.onerror === null) request.onerror = errorHandler(reject);
+    if (request.onabort === null) request.onabort = () => reject(new Error('Abort'));
   });
 }
 
