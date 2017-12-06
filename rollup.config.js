@@ -1,4 +1,4 @@
-import babel from 'rollup-plugin-babel';
+import buble from 'rollup-plugin-buble';
 
 export default {
   input: 'src/index.js',
@@ -8,7 +8,7 @@ export default {
   },
   sourcemap: true,
   plugins: [
-    babel({
+    buble({
       exclude: 'node_modules/**' // only transpile our source code
     })
   ],

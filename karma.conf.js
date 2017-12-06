@@ -31,7 +31,7 @@ module.exports = function(config) {
     },
 
     rollupPreprocessor: {
-      plugins: [ require('rollup-plugin-babel')() ],
+      plugins: [ require('rollup-plugin-buble')({ exclude: 'node_modules/**' }) ],
       format: 'iife',
       sourcemap: 'inline'
     },
