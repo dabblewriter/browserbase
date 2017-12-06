@@ -219,6 +219,14 @@ class ObjectStore extends EventDispatcher {
   }
 
   /**
+   * Gets the count of all objects in this store
+   * @return {Promise} Resolves with a number
+   */
+  count() {
+    return requestToPromise(this._transStore('readonly').count());
+  }
+
+  /**
    * Adds an object to the store. If an object with the given key already exists, it will not overwrite it.
    * @param {Object} obj The object you want to add to the store
    * @param {mixed} key Optional, the key of the object when it is not part of the object fields
@@ -479,6 +487,16 @@ class Where {
   getKey() {
     // Allow reverse() to be used by going through the getAllKeys method
     return this.limit(1).getAllKeys().then(result => result[0]);
+  }
+
+  /**
+   * Gets the count of the objects matching the criteria
+   * @return {Promise} Resolves with a number
+   */
+  count() {
+    let store = this.store._transStore('readonly');
+    let source = this.index ? store.index(this.index) : store;
+    return requestToPromise(source.count(range));
   }
 
   /**
