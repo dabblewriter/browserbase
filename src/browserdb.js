@@ -321,6 +321,7 @@ class Where {
     this._lowerOpen = false;
     this._value = undefined;
     this._limit = undefined;
+    this._direction = 'next';
   }
 
   /**
@@ -397,6 +398,15 @@ class Where {
   }
 
   /**
+   * Reverses the direction a cursor will get things.
+   * @return {Where} Reference to this
+   */
+  reverse() {
+    this._direction = 'prev';
+    return this;
+  }
+
+  /**
    * Converts this Where to its IDBKeyRange equivalent.
    * @return {IDBKeyRange} The range this Where represents
    */
@@ -418,9 +428,40 @@ class Where {
    */
   getAll() {
     let range = this.toRange();
+    // Handle reverse with getAll and get
+    if (this._direction === 'prev') {
+      let results = [];
+      if (this._limit <= 0) return Promise.resolve(results);
+      return this.forEach(obj => {
+        results.push(obj);
+        if (results.length >= this._limit) return false;
+      }).then(() => results);
+    }
+
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
     return requestToPromise(source.getAll(range, this._limit));
+  }
+
+  /**
+   * Get all the keys matching the range limited by the limit.
+   * @return {Promise} Resolves with an array of objects
+   */
+  getAllKeys() {
+    let range = this.toRange();
+    // Handle reverse with getAll and get
+    if (this._direction === 'prev') {
+      let results = [];
+      if (this._limit <= 0) return Promise.resolve(results);
+      return this.cursor(cursor => {
+        results.push(cursor.key);
+        if (results.length >= this._limit) return false;
+      }, 'readonly', true).then(() => results);
+    }
+
+    let store = this.store._transStore('readonly');
+    let source = this.index ? store.index(this.index) : store;
+    return requestToPromise(source.getAllKeys(range, this._limit));
   }
 
   /**
@@ -428,7 +469,16 @@ class Where {
    * @return {Promise} Resolves with an object or undefined if none was found
    */
   get() {
-    return this.limit(1).getAll().then(result => result.shift());
+    return this.limit(1).getAll().then(result => result[0]);
+  }
+
+  /**
+   * Gets a single key, the first one matching the criteria
+   * @return {Promise} Resolves with an object or undefined if none was found
+   */
+  getKey() {
+    // Allow reverse() to be used by going through the getAllKeys method
+    return this.limit(1).getAllKeys().then(result => result[0]);
   }
 
   /**
@@ -443,6 +493,34 @@ class Where {
         this.store.db.dispatchChange(this.store, null, key);
       });
     }, 'readwrite').then(promises => Promise.all(promises)).then(() => {});
+  }
+
+  /**
+   * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
+   * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
+   * @return {Promise}           Resolves without result when the cursor has finished
+   */
+  cursor(iterator, mode = 'readonly', keyCursor = false) {
+    return new Promise((resolve, reject) => {
+      let range = this.toRange();
+      let store = this.store._transStore(mode);
+      let source = this.index ? store.index(this.index) : store;
+      let method = keyCursor ? 'openKeyCursor' : 'openCursor'
+      let request = source[method](range, this._direction);
+      let count = 0;
+      request.onsuccess = event => {
+        var cursor = event.target.result;
+        if (cursor) {
+          let result = iterator(cursor, store.transaction);
+          if (this._limit !== undefined && ++count >= this._limit) result = false;
+          if (result !== false) cursor.continue();
+          else resolve();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = errorHandler(reject);
+    });
   }
 
   /**
@@ -474,23 +552,10 @@ class Where {
    * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
    * @return {Promise}           Resolves without result when the cursor has finished
    */
-  forEach(iterator, mode = 'readonly', direction = 'next') {
-    return new Promise((resolve, reject) => {
-      let range = this.toRange();
-      let store = this.store._transStore(mode);
-      let source = this.index ? store.index(this.index) : store;
-      let request = source.openCursor(range, direction);
-      request.onsuccess = event => {
-        var cursor = event.target.result;
-        if (cursor) {
-          iterator(cursor.value, cursor, store.transaction);
-          cursor.continue();
-        } else {
-          resolve(event.target.result);
-        }
-      };
-      request.onerror = errorHandler(reject);
-    });
+  forEach(iterator, mode = 'readonly') {
+    return this.cursor((cursor, trans) => {
+      return iterator(cursor.value, cursor, trans);
+    }, mode);
   }
 
   /**
@@ -498,11 +563,11 @@ class Where {
    * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
    * @return {Promise}           Resolves with an array which is the return result of each iteration
    */
-  map(iterator, mode = 'readonly', direction = 'next') {
+  map(iterator, mode = 'readonly') {
     let results = [];
     return this.forEach((object, cursor, trans) => {
       results.push(iterator(object, cursor, trans));
-    }, mode, direction).then(() => results);
+    }, mode).then(() => results);
   }
 }
 

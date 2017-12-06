@@ -99,6 +99,7 @@ describe('BrowserDB', () => {
             throw new Error('Did not fail');
           }, err => {
             // good, good
+            expect(err.name).to.equal('ConstraintError');
           });
         });
       });
@@ -297,6 +298,50 @@ describe('BrowserDB', () => {
             { key: 'test2' },
             { key: 'test3' },
             { key: 'test4' },
+          ]);
+        });
+      });
+    });
+  });
+
+  it('should get a range of objects with limit', () => {
+    db.version(1, { foo: 'key' });
+    return db.open().then(() => {
+      db.start();
+      db.foo.put({ key: 'test1' });
+      db.foo.put({ key: 'test2' });
+      db.foo.put({ key: 'test3' });
+      db.foo.put({ key: 'test4' });
+      db.foo.put({ key: 'test5' });
+      db.foo.put({ key: 'test6' });
+      return db.commit().then(() => {
+        return db.foo.where('key').startAt('test2').endBefore('test5').limit(2).getAll().then(objects => {
+          expect(objects).to.deep.equal([
+            { key: 'test2' },
+            { key: 'test3' },
+          ]);
+        });
+      });
+    });
+  });
+
+  it('should cursor over a range of objects with limit', () => {
+    db.version(1, { foo: 'key' });
+    return db.open().then(() => {
+      db.start();
+      let objects = [];
+      db.foo.put({ key: 'test1' });
+      db.foo.put({ key: 'test2' });
+      db.foo.put({ key: 'test3' });
+      db.foo.put({ key: 'test4' });
+      db.foo.put({ key: 'test5' });
+      db.foo.put({ key: 'test6' });
+      return db.commit().then(() => {
+        return db.foo.where('key').startAt('test2').endBefore('test5').limit(2)
+        .forEach(obj => objects.push(obj)).then(() => {
+          expect(objects).to.deep.equal([
+            { key: 'test2' },
+            { key: 'test3' },
           ]);
         });
       });
