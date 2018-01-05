@@ -1,5 +1,6 @@
 import EventDispatcher from './event-dispatcher';
 const maxString = String.fromCharCode(65535);
+const localStorage = window.localStorage;
 
 
 /**
@@ -711,21 +712,22 @@ function onOpen(browserDB) {
   db.onerror = event => browserDB.dispatchEvent('error', event.target.error);
   const prefix = `browserDB/${browserDB.name}/`;
   browserDB._onStorage = event => {
-    if (event.newValue && event.key.slice(0, prefix.length) === prefix) {
-      try {
-        let storeName = event.key.replace(prefix, '');
-        let key = event.newValue;
-        let store = browserDB[storeName];
-        if (store) {
-          store.get(key).then((object = null) => {
-            browserDB.dispatchChange(store, object, key, 'remote');
-          });
-        } else {
-          console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
-        }
-      } catch (err) {
-        console.warn('Error parsing object change from browserDB:', err);
+    if (event.storageArea !== localStorage) return;
+    if (event.newValue === null || event.newValue === '') return;
+    if (event.key.slice(0, prefix.length) !== prefix) return;
+    try {
+      let storeName = event.key.replace(prefix, '');
+      let key = event.newValue;
+      let store = browserDB[storeName];
+      if (store) {
+        store.get(key).then((object = null) => {
+          browserDB.dispatchChange(store, object, key, 'remote');
+        });
+      } else {
+        console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
       }
+    } catch (err) {
+      console.warn('Error parsing object change from browserDB:', err);
     }
   };
 
