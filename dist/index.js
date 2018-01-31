@@ -79,6 +79,7 @@ function getEventListeners(obj, type) {
 }
 
 var maxString = String.fromCharCode(65535);
+var localStorage = window.localStorage;
 
 
 /**
@@ -128,8 +129,8 @@ var maxString = String.fromCharCode(65535);
  *   console.warn('There was an error opening the database:', err);
  * });
  */
-var BrowserDB = (function (EventDispatcher$$1) {
-  function BrowserDB(name) {
+var Browserbase = (function (EventDispatcher$$1) {
+  function Browserbase(name) {
     EventDispatcher$$1.call(this);
     this.name = name;
     this.db = null;
@@ -139,22 +140,22 @@ var BrowserDB = (function (EventDispatcher$$1) {
     this._onStorage = null;
   }
 
-  if ( EventDispatcher$$1 ) BrowserDB.__proto__ = EventDispatcher$$1;
-  BrowserDB.prototype = Object.create( EventDispatcher$$1 && EventDispatcher$$1.prototype );
-  BrowserDB.prototype.constructor = BrowserDB;
+  if ( EventDispatcher$$1 ) Browserbase.__proto__ = EventDispatcher$$1;
+  Browserbase.prototype = Object.create( EventDispatcher$$1 && EventDispatcher$$1.prototype );
+  Browserbase.prototype.constructor = Browserbase;
 
   /**
    * Defines a version for the database. Additional versions may be added, but existing version should not be changed.
    * @param  {Number} version           The version number
    * @param  {Object} stores            An object with store name as the key and a comma-delimited string of indexes
    * @param  {Function} upgradeFunction An optional function that will be called when upgrading, used for data updates
-   * @return {BrowserDB}                A reference to itself
+   * @return {Browserbase}                A reference to itself
    */
-  BrowserDB.deleteDatabase = function deleteDatabase (name) {
+  Browserbase.deleteDatabase = function deleteDatabase (name) {
     return requestToPromise(window.indexedDB.deleteDatabase(name));
   };
 
-  BrowserDB.prototype.version = function version (version$1, stores, upgradeFunction) {
+  Browserbase.prototype.version = function version (version$1, stores, upgradeFunction) {
     this._versionMap[version$1] = stores;
     if (upgradeFunction) {
       this._versionHandlers[version$1] = upgradeFunction;
@@ -166,7 +167,7 @@ var BrowserDB = (function (EventDispatcher$$1) {
    * Whether this database is open or closed.
    * @return {Boolean}
    */
-  BrowserDB.prototype.isOpen = function isOpen () {
+  Browserbase.prototype.isOpen = function isOpen () {
     return Boolean(this.db);
   };
 
@@ -174,11 +175,11 @@ var BrowserDB = (function (EventDispatcher$$1) {
    * Open a database, call this after defining versions.
    * @return {Promise}
    */
-  BrowserDB.prototype.open = function open () {
+  Browserbase.prototype.open = function open () {
     var this$1 = this;
 
     if (!Object.keys(this._versionMap).length) {
-      return Promise.reject(new Error('Must declare at least a version 1 schema for BrowserDB'));
+      return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
     var version = Object.keys(this._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; }).pop();
     return new Promise(function (resolve, reject) {
@@ -202,7 +203,7 @@ var BrowserDB = (function (EventDispatcher$$1) {
   /**
    * Closes the databse.
    */
-  BrowserDB.prototype.close = function close () {
+  Browserbase.prototype.close = function close () {
     if (!this.db) { return; }
     this.db.close();
     onClose(this);
@@ -215,7 +216,7 @@ var BrowserDB = (function (EventDispatcher$$1) {
    * @param  {String} mode       The mode, defaults to readwrite unlike the indexedDB API
    * @return {Promise}           A promise which is resolved once the transaction is complete
    */
-  BrowserDB.prototype.start = function start (storeNames, mode) {
+  Browserbase.prototype.start = function start (storeNames, mode) {
     var this$1 = this;
     if ( mode === void 0 ) mode = 'readwrite';
 
@@ -236,7 +237,7 @@ var BrowserDB = (function (EventDispatcher$$1) {
    * code elsewhere.
    * @return {Promise} The same promise returned by start() which will resolve once the transaction is done.
    */
-  BrowserDB.prototype.commit = function commit () {
+  Browserbase.prototype.commit = function commit () {
     if (!this.current) { throw new Error('There is no current transaction to commit.'); }
     var promise = this.current.promise;
     this.current = null;
@@ -250,19 +251,19 @@ var BrowserDB = (function (EventDispatcher$$1) {
    * @param {mixed}       key    The key of the object being changed or deleted
    * @param {String}      from   The source of this event, whether it was from the 'local' window or a 'remote' window
    */
-  BrowserDB.prototype.dispatchChange = function dispatchChange (store, obj, key, from) {
+  Browserbase.prototype.dispatchChange = function dispatchChange (store, obj, key, from) {
     if ( from === void 0 ) from = 'local';
 
     this.dispatchEvent('change', store.name, obj, key, from);
     store.dispatchEvent('change', obj, key, from);
     if (from === 'local') {
-      var itemKey = "browserDB/" + (this.name) + "/" + (store.name);
+      var itemKey = "browserbase/" + (this.name) + "/" + (store.name);
       localStorage.setItem(itemKey, key);
       localStorage.removeItem(itemKey);
     }
   };
 
-  return BrowserDB;
+  return Browserbase;
 }(EventDispatcher));
 
 /**
@@ -301,6 +302,14 @@ var ObjectStore = (function (EventDispatcher$$1) {
    */
   ObjectStore.prototype.getAll = function getAll () {
     return requestToPromise(this._transStore('readonly').getAll());
+  };
+
+  /**
+   * Gets the count of all objects in this store
+   * @return {Promise} Resolves with a number
+   */
+  ObjectStore.prototype.count = function count () {
+    return requestToPromise(this._transStore('readonly').count());
   };
 
   /**
@@ -419,6 +428,7 @@ var Where = function Where(store, index) {
   this._lowerOpen = false;
   this._value = undefined;
   this._limit = undefined;
+  this._direction = 'next';
 };
 
 /**
@@ -495,6 +505,15 @@ Where.prototype.limit = function limit (count) {
 };
 
 /**
+ * Reverses the direction a cursor will get things.
+ * @return {Where} Reference to this
+ */
+Where.prototype.reverse = function reverse () {
+  this._direction = 'prev';
+  return this;
+};
+
+/**
  * Converts this Where to its IDBKeyRange equivalent.
  * @return {IDBKeyRange} The range this Where represents
  */
@@ -515,10 +534,45 @@ Where.prototype.toRange = function toRange () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAll = function getAll () {
+    var this$1 = this;
+
   var range = this.toRange();
+  // Handle reverse with getAll and get
+  if (this._direction === 'prev') {
+    var results = [];
+    if (this._limit <= 0) { return Promise.resolve(results); }
+    return this.forEach(function (obj) {
+      results.push(obj);
+      if (results.length >= this$1._limit) { return false; }
+    }).then(function () { return results; });
+  }
+
   var store = this.store._transStore('readonly');
   var source = this.index ? store.index(this.index) : store;
   return requestToPromise(source.getAll(range, this._limit));
+};
+
+/**
+ * Get all the keys matching the range limited by the limit.
+ * @return {Promise} Resolves with an array of objects
+ */
+Where.prototype.getAllKeys = function getAllKeys () {
+    var this$1 = this;
+
+  var range = this.toRange();
+  // Handle reverse with getAll and get
+  if (this._direction === 'prev') {
+    var results = [];
+    if (this._limit <= 0) { return Promise.resolve(results); }
+    return this.cursor(function (cursor) {
+      results.push(cursor.key);
+      if (results.length >= this$1._limit) { return false; }
+    }, 'readonly', true).then(function () { return results; });
+  }
+
+  var store = this.store._transStore('readonly');
+  var source = this.index ? store.index(this.index) : store;
+  return requestToPromise(source.getAllKeys(range, this._limit));
 };
 
 /**
@@ -526,7 +580,26 @@ Where.prototype.getAll = function getAll () {
  * @return {Promise} Resolves with an object or undefined if none was found
  */
 Where.prototype.get = function get () {
-  return this.limit(1).getAll().then(function (result) { return result.shift(); });
+  return this.limit(1).getAll().then(function (result) { return result[0]; });
+};
+
+/**
+ * Gets a single key, the first one matching the criteria
+ * @return {Promise} Resolves with an object or undefined if none was found
+ */
+Where.prototype.getKey = function getKey () {
+  // Allow reverse() to be used by going through the getAllKeys method
+  return this.limit(1).getAllKeys().then(function (result) { return result[0]; });
+};
+
+/**
+ * Gets the count of the objects matching the criteria
+ * @return {Promise} Resolves with a number
+ */
+Where.prototype.count = function count () {
+  var store = this.store._transStore('readonly');
+  var source = this.index ? store.index(this.index) : store;
+  return requestToPromise(source.count(range));
 };
 
 /**
@@ -543,6 +616,38 @@ Where.prototype.deleteAll = function deleteAll () {
       this$1.store.db.dispatchChange(this$1.store, null, key);
     });
   }, 'readwrite').then(function (promises) { return Promise.all(promises); }).then(function () {});
+};
+
+/**
+ * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
+ * @param{Function} iterator A function which will be called for each object with the (object, cursor) signature
+ * @return {Promise}         Resolves without result when the cursor has finished
+ */
+Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
+    var this$1 = this;
+    if ( mode === void 0 ) mode = 'readonly';
+    if ( keyCursor === void 0 ) keyCursor = false;
+
+  return new Promise(function (resolve, reject) {
+    var range = this$1.toRange();
+    var store = this$1.store._transStore(mode);
+    var source = this$1.index ? store.index(this$1.index) : store;
+    var method = keyCursor ? 'openKeyCursor' : 'openCursor';
+    var request = source[method](range, this$1._direction);
+    var count = 0;
+    request.onsuccess = function (event) {
+      var cursor = event.target.result;
+      if (cursor) {
+        var result = iterator(cursor, store.transaction);
+        if (this$1._limit !== undefined && ++count >= this$1._limit) { result = false; }
+        if (result !== false) { cursor.continue(); }
+        else { resolve(); }
+      } else {
+        resolve();
+      }
+    };
+    request.onerror = errorHandler(reject);
+  });
 };
 
 /**
@@ -576,27 +681,12 @@ Where.prototype.update = function update (iterator) {
  * @param{Function} iterator A function which will be called for each object with the (object, cursor) signature
  * @return {Promise}         Resolves without result when the cursor has finished
  */
-Where.prototype.forEach = function forEach (iterator, mode, direction) {
-    var this$1 = this;
+Where.prototype.forEach = function forEach (iterator, mode) {
     if ( mode === void 0 ) mode = 'readonly';
-    if ( direction === void 0 ) direction = 'next';
 
-  return new Promise(function (resolve, reject) {
-    var range = this$1.toRange();
-    var store = this$1.store._transStore(mode);
-    var source = this$1.index ? store.index(this$1.index) : store;
-    var request = source.openCursor(range, direction);
-    request.onsuccess = function (event) {
-      var cursor = event.target.result;
-      if (cursor) {
-        iterator(cursor.value, cursor, store.transaction);
-        cursor.continue();
-      } else {
-        resolve(event.target.result);
-      }
-    };
-    request.onerror = errorHandler(reject);
-  });
+  return this.cursor(function (cursor, trans) {
+    return iterator(cursor.value, cursor, trans);
+  }, mode);
 };
 
 /**
@@ -604,14 +694,13 @@ Where.prototype.forEach = function forEach (iterator, mode, direction) {
  * @param{Function} iterator A function which will be called for each object with the (object, cursor) signature
  * @return {Promise}         Resolves with an array which is the return result of each iteration
  */
-Where.prototype.map = function map (iterator, mode, direction) {
+Where.prototype.map = function map (iterator, mode) {
     if ( mode === void 0 ) mode = 'readonly';
-    if ( direction === void 0 ) direction = 'next';
 
   var results = [];
   return this.forEach(function (object, cursor, trans) {
     results.push(iterator(object, cursor, trans));
-  }, mode, direction).then(function () { return results; });
+  }, mode).then(function () { return results; });
 };
 
 
@@ -698,14 +787,14 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
 }
 
 
-function onOpen(browserDB) {
+function onOpen(browserbase) {
   var this$1 = this;
 
   // Store keyPath's for each store
   var keyPaths = {};
-  var versions = Object.keys(browserDB._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; });
+  var versions = Object.keys(browserbase._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; });
   versions.forEach(function (version) {
-    var stores = browserDB._versionMap[version];
+    var stores = browserbase._versionMap[version];
     Object.keys(stores).forEach(function (name) {
       if (keyPaths[name] || !stores[name]) { return; }
       var indexes = stores[name].split(/\s*,\s*/);
@@ -713,67 +802,68 @@ function onOpen(browserDB) {
     });
   });
 
-  var db = browserDB.db;
+  var db = browserbase.db;
 
   db.onversionchange = function (event) {
-    if (browserDB.dispatchCancelableEvent('versionchange')) {
+    if (browserbase.dispatchCancelableEvent('versionchange')) {
       if (event.newVersion > 0) {
         console.warn(("Another connection wants to upgrade database '" + (this$1.name) + "'. Closing db now to resume the upgrade."));
       } else {
         console.warn(("Another connection wants to delete database '" + (this$1.name) + "'. Closing db now to resume the delete request."));
       }
-      browserDB.close();
+      browserbase.close();
     }
   };
   db.onblocked = function (event) {
-    if (browserDB.dispatchCancelableEvent('blocked')) {
+    if (browserbase.dispatchCancelableEvent('blocked')) {
       if (!event.newVersion || event.newVersion < event.oldVersion) {
-        console.warn(("BrowserDB.delete('" + (browserDB.name) + "') was blocked"));
+        console.warn(("Browserbase.delete('" + (browserbase.name) + "') was blocked"));
       } else {
-        console.warn(("Upgrade '" + (browserDB.name) + "' blocked by other connection holding version " + (event.oldVersion)));
+        console.warn(("Upgrade '" + (browserbase.name) + "' blocked by other connection holding version " + (event.oldVersion)));
       }
     }
   };
-  db.onclose = function () { return onClose(browserDB); };
-  db.onerror = function (event) { return browserDB.dispatchEvent('error', event.target.error); };
-  var prefix = "browserDB/" + (browserDB.name) + "/";
-  browserDB._onStorage = function (event) {
-    if (event.newValue && event.key.slice(0, prefix.length) === prefix) {
-      try {
-        var storeName = event.key.replace(prefix, '');
-        var key = event.newValue;
-        var store = browserDB[storeName];
-        if (store) {
-          store.get(key).then(function (object) {
-            if ( object === void 0 ) object = null;
+  db.onclose = function () { return onClose(browserbase); };
+  db.onerror = function (event) { return browserbase.dispatchEvent('error', event.target.error); };
+  var prefix = "browserbase/" + (browserbase.name) + "/";
+  browserbase._onStorage = function (event) {
+    if (event.storageArea !== localStorage) { return; }
+    if (event.newValue === null || event.newValue === '') { return; }
+    if (event.key.slice(0, prefix.length) !== prefix) { return; }
+    try {
+      var storeName = event.key.replace(prefix, '');
+      var key = event.newValue;
+      var store = browserbase[storeName];
+      if (store) {
+        store.get(key).then(function (object) {
+          if ( object === void 0 ) object = null;
 
-            browserDB.dispatchChange(store, object, key, 'remote');
-          });
-        } else {
-          console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
-        }
-      } catch (err) {
-        console.warn('Error parsing object change from browserDB:', err);
+          browserbase.dispatchChange(store, object, key, 'remote');
+        });
+      } else {
+        console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
       }
+    } catch (err) {
+      console.warn('Error parsing object change from browserbase:', err);
     }
   };
 
-  window.addEventListener('storage', browserDB._onStorage);
+  window.addEventListener('storage', browserbase._onStorage);
 
   var names = db.objectStoreNames;
   for (var i = 0; i < names.length; i++) {
     var name = names[i];
-    browserDB[name] = new ObjectStore(browserDB, name, keyPaths[name]);
+    browserbase[name] = new ObjectStore(browserbase, name, keyPaths[name]);
   }
 }
 
 
-function onClose(browserDB) {
-  window.removeEventListener('storage', browserDB._onStorage);
-  browserDB.db = null;
-  browserDB.dispatchEvent('close');
+function onClose(browserbase) {
+  window.removeEventListener('storage', browserbase._onStorage);
+  browserbase.db = null;
+  browserbase.dispatchEvent('close');
 }
 
 exports.EventDispatcher = EventDispatcher;
-exports.BrowserDB = BrowserDB;
+exports.Browserbase = Browserbase;
 //# sourceMappingURL=index.js.map
