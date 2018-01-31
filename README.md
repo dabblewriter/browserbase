@@ -1,6 +1,6 @@
-# BrowserDB
+# Browserbase
 
-BrowserDB is a wrapper around the IndexedDB browser database that makes it easier to use. It provides
+Browserbase is a wrapper around the IndexedDB browser database which makes it easier to use. It provides
 * a Promise-based API using native browser promises (provide your own polyfill for IE 11)
 * easy versioning with indexes
 * events for open, close, and error
@@ -12,13 +12,12 @@ https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API.
 
 ## Why another wrapper?
 
-Dexie was the only robust wrapper with a decent API, but it is much larger than it needs to be and commits the
-unpardonable library sin, it catches errors in your code giving you a `console.warn` about them. Libraries should never
-do this.
+Dexie was the only robust wrapper with a decent API at the time I wrote Browserbase, but it is much larger than it needs
+to be and catches errors in your code giving you a `console.warn` about them. Libraries should never do this.
 
-## Overview of BrowserDB vs IndexedDB Interfaces
+## Overview of Browserbase vs IndexedDB Interfaces
 
-I will attempt to summarize the IndexedDB interfaces and how BrowserDB wraps them.
+I will attempt to summarize the IndexedDB interfaces and how Browserbase wraps them.
 
 Here is a list of the main IndexedDB interfaces. I skip over the request interfaces.
 
@@ -31,7 +30,7 @@ Here is a list of the main IndexedDB interfaces. I skip over the request interfa
 * `IDBCursor` lets you iterate over objects in a store one at a time for better memory usage (e.g. if you have millions of records).
 * `IDBKeyRange` helps you define a range with min/max records on an index to select a range of objects.
 
-When you create a new BrowserDB instance it does not interact with any IndexedDB interfaces until you call `open()`.
+When you create a new Browserbase instance it does not interact with any IndexedDB interfaces until you call `open()`.
 This then opens an IndexedDB database assigning the `IDBDatabase` instance to the `db` property.
 
 Most actions in IndexedDB are performed within a transaction. You don't have to "commit" a transaction, you just create
@@ -39,16 +38,16 @@ a new transaction object and access stores, indexes, and cursors from it. Everyt
 cursor is part of the transaction, and you can continue using that transaction immediately after actions complete. The
 transaction is offically finished once there is nothing being done within it during a microtask/frame.
 
-BrowserDB attempts to hide transactions for simplification. It provides the following interfaces.
+Browserbase attempts to hide transactions for simplification. It provides the following interfaces.
 
-* `BrowserDB` represents the database connection, provides events, provides database versioning, and provides access to
+* `Browserbase` represents the database connection, provides events, provides database versioning, and provides access to
   the object stores.
 * `ObjectStore` represents an object store, but it doesn't access an actual object store until calling an action so that
   it can create a new transaction before it does.
 * `Where` helps creating a range for reading and writing data in bulk from/to the database. It will use indexes and
   cursors as needed.
 
-BrowserDB knows that often you are only performing a single action within a transaction. So it tries to simplify
+Browserbase knows that often you are only performing a single action within a transaction. So it tries to simplify
 transactions by making them implicit. When you perform an `add` or a `put` on a store it automatically creates a
 `readwrite` transaction with that one object store for you and runs the operation within it.
 
@@ -57,7 +56,7 @@ property is passed in. When using methods like `forEach` it will use a cursor to
 
 ## API
 
-To keep small, BrowserDB doesn't provide too many features on top of IndexedDB, opting to just the API that will make it
+To keep small, Browserbase doesn't provide too many features on top of IndexedDB, opting to just the API that will make it
 IndexedDB easier to use (at least, easier to use in the author's opinion).
 
 ### Versioning

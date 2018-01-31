@@ -1,4 +1,4 @@
 import EventDispatcher from './event-dispatcher';
-import BrowserDB from './browserdb';
+import Browserbase from './browserbase';
 
-export { EventDispatcher, BrowserDB };
+export { EventDispatcher, Browserbase };

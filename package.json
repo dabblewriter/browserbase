@@ -1,5 +1,5 @@
 {
-  "name": "browserdb",
+  "name": "browserbase",
   "version": "1.0.0",
   "description": "IndexedDB wrapper providing promises, easy versioning, and events, including change events across tabs.",
   "main": "dist/index.js",
@@ -11,14 +11,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dabblewriter/browserdb.git"
+    "url": "git+https://github.com/dabblewriter/browserbase.git"
   },
   "author": "Jacob Wright",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/dabblewriter/browserdb/issues"
+    "url": "https://github.com/dabblewriter/browserbase/issues"
   },
-  "homepage": "https://github.com/dabblewriter/browserdb#readme",
+  "homepage": "https://github.com/dabblewriter/browserbase#readme",
   "devDependencies": {
     "chai": "^4.1.2",
     "karma": "^1.7.0",

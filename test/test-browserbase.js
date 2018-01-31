@@ -1,16 +1,16 @@
-import BrowserDB from '../src/browserdb';
+import Browserbase from '../src/browserbase';
 
 
-describe('BrowserDB', () => {
+describe('Browserbase', () => {
   let db;
 
   beforeEach(() => {
-    db = new BrowserDB('test');
+    db = new Browserbase('test');
   });
 
   afterEach(() => {
     db.close();
-    BrowserDB.deleteDatabase('test');
+    Browserbase.deleteDatabase('test');
   });
 
   it('should fail if no versions were set', () => {

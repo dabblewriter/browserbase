@@ -50,7 +50,7 @@ const localStorage = window.localStorage;
  *   console.warn('There was an error opening the database:', err);
  * });
  */
-export default class BrowserDB extends EventDispatcher {
+export default class Browserbase extends EventDispatcher {
 
   /**
    * Deletes a database by name.
@@ -78,7 +78,7 @@ export default class BrowserDB extends EventDispatcher {
    * @param  {Number} version           The version number
    * @param  {Object} stores            An object with store name as the key and a comma-delimited string of indexes
    * @param  {Function} upgradeFunction An optional function that will be called when upgrading, used for data updates
-   * @return {BrowserDB}                A reference to itself
+   * @return {Browserbase}                A reference to itself
    */
   version(version, stores, upgradeFunction) {
     this._versionMap[version] = stores;
@@ -102,7 +102,7 @@ export default class BrowserDB extends EventDispatcher {
    */
   open() {
     if (!Object.keys(this._versionMap).length) {
-      return Promise.reject(new Error('Must declare at least a version 1 schema for BrowserDB'));
+      return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
     let version = Object.keys(this._versionMap).map(key => parseInt(key)).sort((a, b) => a - b).pop();
     return new Promise((resolve, reject) => {
@@ -175,7 +175,7 @@ export default class BrowserDB extends EventDispatcher {
     this.dispatchEvent('change', store.name, obj, key, from);
     store.dispatchEvent('change', obj, key, from);
     if (from === 'local') {
-      let itemKey = `browserDB/${this.name}/${store.name}`;
+      let itemKey = `browserbase/${this.name}/${store.name}`;
       localStorage.setItem(itemKey, key);
       localStorage.removeItem(itemKey);
     }
@@ -674,12 +674,12 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
 }
 
 
-function onOpen(browserDB) {
+function onOpen(browserbase) {
   // Store keyPath's for each store
   let keyPaths = {};
-  let versions = Object.keys(browserDB._versionMap).map(key => parseInt(key)).sort((a, b) => a - b);
+  let versions = Object.keys(browserbase._versionMap).map(key => parseInt(key)).sort((a, b) => a - b);
   versions.forEach(version => {
-    let stores = browserDB._versionMap[version];
+    let stores = browserbase._versionMap[version];
     Object.keys(stores).forEach(name => {
       if (keyPaths[name] || !stores[name]) return;
       let indexes = stores[name].split(/\s*,\s*/);
@@ -687,62 +687,62 @@ function onOpen(browserDB) {
     });
   });
 
-  let db = browserDB.db;
+  let db = browserbase.db;
 
   db.onversionchange = event => {
-    if (browserDB.dispatchCancelableEvent('versionchange')) {
+    if (browserbase.dispatchCancelableEvent('versionchange')) {
       if (event.newVersion > 0) {
         console.warn(`Another connection wants to upgrade database '${this.name}'. Closing db now to resume the upgrade.`);
       } else {
         console.warn(`Another connection wants to delete database '${this.name}'. Closing db now to resume the delete request.`);
       }
-      browserDB.close();
+      browserbase.close();
     }
   };
   db.onblocked = event => {
-    if (browserDB.dispatchCancelableEvent('blocked')) {
+    if (browserbase.dispatchCancelableEvent('blocked')) {
       if (!event.newVersion || event.newVersion < event.oldVersion) {
-        console.warn(`BrowserDB.delete('${browserDB.name}') was blocked`);
+        console.warn(`Browserbase.delete('${browserbase.name}') was blocked`);
       } else {
-        console.warn(`Upgrade '${browserDB.name}' blocked by other connection holding version ${event.oldVersion}`);
+        console.warn(`Upgrade '${browserbase.name}' blocked by other connection holding version ${event.oldVersion}`);
       }
     }
   };
-  db.onclose = () => onClose(browserDB);
-  db.onerror = event => browserDB.dispatchEvent('error', event.target.error);
-  const prefix = `browserDB/${browserDB.name}/`;
-  browserDB._onStorage = event => {
+  db.onclose = () => onClose(browserbase);
+  db.onerror = event => browserbase.dispatchEvent('error', event.target.error);
+  const prefix = `browserbase/${browserbase.name}/`;
+  browserbase._onStorage = event => {
     if (event.storageArea !== localStorage) return;
     if (event.newValue === null || event.newValue === '') return;
     if (event.key.slice(0, prefix.length) !== prefix) return;
     try {
       let storeName = event.key.replace(prefix, '');
       let key = event.newValue;
-      let store = browserDB[storeName];
+      let store = browserbase[storeName];
       if (store) {
         store.get(key).then((object = null) => {
-          browserDB.dispatchChange(store, object, key, 'remote');
+          browserbase.dispatchChange(store, object, key, 'remote');
         });
       } else {
         console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
       }
     } catch (err) {
-      console.warn('Error parsing object change from browserDB:', err);
+      console.warn('Error parsing object change from browserbase:', err);
     }
   };
 
-  window.addEventListener('storage', browserDB._onStorage);
+  window.addEventListener('storage', browserbase._onStorage);
 
   let names = db.objectStoreNames;
   for (let i = 0; i < names.length; i++) {
     let name = names[i];
-    browserDB[name] = new ObjectStore(browserDB, name, keyPaths[name]);
+    browserbase[name] = new ObjectStore(browserbase, name, keyPaths[name]);
   }
 }
 
 
-function onClose(browserDB) {
-  window.removeEventListener('storage', browserDB._onStorage);
-  browserDB.db = null;
-  browserDB.dispatchEvent('close');
+function onClose(browserbase) {
+  window.removeEventListener('storage', browserbase._onStorage);
+  browserbase.db = null;
+  browserbase.dispatchEvent('close');
 }
