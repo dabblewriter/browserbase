@@ -1,13 +1,14 @@
 {
   "name": "browserbase",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "IndexedDB wrapper providing promises, easy versioning, and events, including change events across tabs.",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "scripts": {
     "start": "rollup -c -w",
     "build": "rollup -c",
-    "test": "karma start --single-run"
+    "test": "karma start --single-run",
+    "prepublish": "npm run build"
   },
   "repository": {
     "type": "git",

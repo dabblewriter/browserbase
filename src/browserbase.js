@@ -393,7 +393,7 @@ class Where {
    * @return {Where}         Reference to this
    */
   startsWith(prefix) {
-    return this.gte(prefix).lte(prefix + maxString);
+    return this.startAt(prefix).endAt(prefix + maxString);
   }
 
   /**
