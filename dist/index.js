@@ -534,17 +534,12 @@ Where.prototype.toRange = function toRange () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAll = function getAll () {
-    var this$1 = this;
-
   var range = this.toRange();
   // Handle reverse with getAll and get
   if (this._direction === 'prev') {
     var results = [];
     if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.forEach(function (obj) {
-      results.push(obj);
-      if (results.length >= this$1._limit) { return false; }
-    }).then(function () { return results; });
+    return this.forEach(function (obj) { return results.push(obj); }).then(function () { return results; });
   }
 
   var store = this.store._transStore('readonly');
@@ -557,17 +552,12 @@ Where.prototype.getAll = function getAll () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAllKeys = function getAllKeys () {
-    var this$1 = this;
-
   var range = this.toRange();
   // Handle reverse with getAll and get
   if (this._direction === 'prev') {
     var results = [];
     if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.cursor(function (cursor) {
-      results.push(cursor.key);
-      if (results.length >= this$1._limit) { return false; }
-    }, 'readonly', true).then(function () { return results; });
+    return this.cursor(function (cursor) { return results.push(cursor.key); }, 'readonly', true).then(function () { return results; });
   }
 
   var store = this.store._transStore('readonly');
@@ -685,7 +675,7 @@ Where.prototype.forEach = function forEach (iterator, mode) {
     if ( mode === void 0 ) mode = 'readonly';
 
   return this.cursor(function (cursor, trans) {
-    return iterator(cursor.value, cursor, trans);
+    iterator(cursor.value, cursor, trans);
   }, mode);
 };
 

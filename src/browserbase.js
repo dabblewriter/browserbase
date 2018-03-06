@@ -441,10 +441,7 @@ class Where {
     if (this._direction === 'prev') {
       let results = [];
       if (this._limit <= 0) return Promise.resolve(results);
-      return this.forEach(obj => {
-        results.push(obj);
-        if (results.length >= this._limit) return false;
-      }).then(() => results);
+      return this.forEach(obj => results.push(obj)).then(() => results);
     }
 
     let store = this.store._transStore('readonly');
@@ -462,10 +459,7 @@ class Where {
     if (this._direction === 'prev') {
       let results = [];
       if (this._limit <= 0) return Promise.resolve(results);
-      return this.cursor(cursor => {
-        results.push(cursor.key);
-        if (results.length >= this._limit) return false;
-      }, 'readonly', true).then(() => results);
+      return this.cursor(cursor => results.push(cursor.key), 'readonly', true).then(() => results);
     }
 
     let store = this.store._transStore('readonly');
@@ -573,7 +567,7 @@ class Where {
    */
   forEach(iterator, mode = 'readonly') {
     return this.cursor((cursor, trans) => {
-      return iterator(cursor.value, cursor, trans);
+      iterator(cursor.value, cursor, trans);
     }, mode);
   }
 
