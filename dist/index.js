@@ -436,7 +436,7 @@ var Where = function Where(store, index) {
  * @param{mixed} value The lower bound
  * @return {Where}     Reference to this
  */
-Where.prototype.startAfter = function startAfter (value) {
+Where.prototype.startsAfter = function startsAfter (value) {
   this._lower = value;
   this._lowerOpen = true;
   return this;
@@ -447,7 +447,7 @@ Where.prototype.startAfter = function startAfter (value) {
  * @param{mixed} value The lower bound
  * @return {Where}     Reference to this
  */
-Where.prototype.startAt = function startAt (value) {
+Where.prototype.startsAt = function startsAt (value) {
   this._lower = value;
   this._lowerOpen = false;
   return this;
@@ -458,7 +458,7 @@ Where.prototype.startAt = function startAt (value) {
  * @param{mixed} value The upper bound
  * @return {Where}     Reference to this
  */
-Where.prototype.endBefore = function endBefore (value) {
+Where.prototype.endsBefore = function endsBefore (value) {
   this._upper = value;
   this._upperOpen = true;
   return this;
@@ -469,7 +469,7 @@ Where.prototype.endBefore = function endBefore (value) {
  * @param{mixed} value The upper bound
  * @return {Where}     Reference to this
  */
-Where.prototype.endAt = function endAt (value) {
+Where.prototype.endsAt = function endsAt (value) {
   this._upper = value;
   this._upperOpen = false;
   return this;
@@ -491,7 +491,7 @@ Where.prototype.equals = function equals (value) {
  * @return {Where}       Reference to this
  */
 Where.prototype.startsWith = function startsWith (prefix) {
-  return this.startAt(prefix).endAt(prefix + maxString);
+  return this.startsAt(prefix).endsAt(prefix + maxString);
 };
 
 /**
@@ -587,6 +587,7 @@ Where.prototype.getKey = function getKey () {
  * @return {Promise} Resolves with a number
  */
 Where.prototype.count = function count () {
+  var range = this.toRange();
   var store = this.store._transStore('readonly');
   var source = this.index ? store.index(this.index) : store;
   return requestToPromise(source.count(range));

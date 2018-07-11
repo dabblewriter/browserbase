@@ -338,7 +338,7 @@ class Where {
    * @param  {mixed} value The lower bound
    * @return {Where}       Reference to this
    */
-  startAfter(value) {
+  startsAfter(value) {
     this._lower = value;
     this._lowerOpen = true;
     return this;
@@ -349,7 +349,7 @@ class Where {
    * @param  {mixed} value The lower bound
    * @return {Where}       Reference to this
    */
-  startAt(value) {
+  startsAt(value) {
     this._lower = value;
     this._lowerOpen = false;
     return this;
@@ -360,7 +360,7 @@ class Where {
    * @param  {mixed} value The upper bound
    * @return {Where}       Reference to this
    */
-  endBefore(value) {
+  endsBefore(value) {
     this._upper = value;
     this._upperOpen = true;
     return this;
@@ -371,7 +371,7 @@ class Where {
    * @param  {mixed} value The upper bound
    * @return {Where}       Reference to this
    */
-  endAt(value) {
+  endsAt(value) {
     this._upper = value;
     this._upperOpen = false;
     return this;
@@ -393,7 +393,7 @@ class Where {
    * @return {Where}         Reference to this
    */
   startsWith(prefix) {
-    return this.startAt(prefix).endAt(prefix + maxString);
+    return this.startsAt(prefix).endsAt(prefix + maxString);
   }
 
   /**
@@ -489,6 +489,7 @@ class Where {
    * @return {Promise} Resolves with a number
    */
   count() {
+    let range = this.toRange();
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
     return requestToPromise(source.count(range));

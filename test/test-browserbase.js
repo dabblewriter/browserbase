@@ -293,7 +293,7 @@ describe('Browserbase', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').startAt('test2').endBefore('test5').getAll().then(objects => {
+        return db.foo.where('key').startsAt('test2').endsBefore('test5').getAll().then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test2' },
             { key: 'test3' },
@@ -315,7 +315,7 @@ describe('Browserbase', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').startAt('test2').endBefore('test5').limit(2).getAll().then(objects => {
+        return db.foo.where('key').startsAt('test2').endsBefore('test5').limit(2).getAll().then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test2' },
             { key: 'test3' },
@@ -337,7 +337,7 @@ describe('Browserbase', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').startAt('test2').endBefore('test5').limit(2)
+        return db.foo.where('key').startsAt('test2').endsBefore('test5').limit(2)
         .forEach(obj => objects.push(obj)).then(() => {
           expect(objects).to.deep.equal([
             { key: 'test2' },
@@ -359,7 +359,7 @@ describe('Browserbase', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').startAfter('test2').endAt('test5').deleteAll().then(() => db.foo.getAll()).then(objects => {
+        return db.foo.where('key').startsAfter('test2').endsAt('test5').deleteAll().then(() => db.foo.getAll()).then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test1' },
             { key: 'test2' },
@@ -381,7 +381,7 @@ describe('Browserbase', () => {
       db.foo.put({ key: 'test5' });
       db.foo.put({ key: 'test6' });
       return db.commit().then(() => {
-        return db.foo.where('key').startAt('test2').endAt('test5').update(obj => {
+        return db.foo.where('key').startsAt('test2').endsAt('test5').update(obj => {
           if (obj.key === 'test2') return null;
           if (obj.key === 'test5') return;
           obj.name = obj.key;
