@@ -9,8 +9,8 @@ const localStorage = window.localStorage;
  *
  * Versioning is simplified. You provide a string of new indexes for each new version, with the first being the primary
  * key. For primary keys, use a "++" prefix to indicate auto-increment, leave it empty if the key isn't part of the
- * object. For indexes, use a "-" index to delete a defined index, use "&" to indicate a unique index, and use "*" for a
- * multiEntry index. Examples:
+ * object. For indexes, use a "-" index to delete a defined index, use "&" to indicate a unique index, use "*" for a
+ * multiEntry index, and use "[field + anotherField]" for compound indexes. Examples:
  *
  * // Initial version, should remain the same with updates
  * db.version(1, {
@@ -26,7 +26,7 @@ const localStorage = window.localStorage;
  * // Remove the age index and add one for birthdate, add another object store with an auto-incrementing primary key
  * // that isn't part of the object, and a multiEntry index on the labels array.
  * db.version(3, {
- *   friends: 'birthdate, -age',
+ *   friends: 'birthdate, -age, [lastName + firstName]',
  *   events: '++, date, *labels'
  * });
  *
@@ -311,6 +311,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Where}        A Where instance associated with this object store
    */
   where(index = '') {
+    index = index.replace(/\s/g, '');
     return new Where(this, index === this.keyPath ? '' : index);
   }
 }
@@ -647,10 +648,11 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
 
         indexes.forEach(name => {
           if (!name) return;
-          if (name[0] === '-') return store.deleteIndex(name.slice(1));
+          if (name[0] === '-') return store.deleteIndex(name.replace(/^-[&*]?/, ''));
 
           let options = {};
 
+          name = name.replace(/\s/g, '');
           if (name[0] === '&') {
             name = name.slice(1);
             options.unique = true;
@@ -658,7 +660,8 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
             name = name.slice(1);
             options.multiEntry = true;
           }
-          store.createIndex(name, name, options);
+          let keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
+          store.createIndex(name, keyPath, options);
         });
       });
 

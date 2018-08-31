@@ -44,7 +44,7 @@ EventDispatcher.prototype.off = function off (type, listener) {
 /**
  * Dispatches an event calling all listeners with the given args (minus type).
  */
-EventDispatcher.prototype.dispatchEvent = function dispatchEvent (type /*[ args]*/) {
+EventDispatcher.prototype.dispatchEvent = function dispatchEvent (type /*[, args]*/) {
   var args = slice.call(arguments, 1);
   getEventListeners(this, type).forEach(function(listener) {
     listener.apply(this, args);
@@ -56,7 +56,7 @@ EventDispatcher.prototype.dispatchEvent = function dispatchEvent (type /*[ args]
  * Dispatches an event but stops on the first listener to return false. Returns true if no listeners cancel the
  * action. Use for "cancelable" actions to check if they can be performed.
  */
-EventDispatcher.prototype.dispatchCancelableEvent = function dispatchCancelableEvent (type /*[ args]*/) {
+EventDispatcher.prototype.dispatchCancelableEvent = function dispatchCancelableEvent (type /*[, args]*/) {
   var args = slice.call(arguments, 1);
   return getEventListeners(this, type).every(function(listener) {
     return listener.apply(this, args) !== false;
@@ -66,6 +66,7 @@ EventDispatcher.prototype.dispatchCancelableEvent = function dispatchCancelableE
 EventDispatcher.prototype.removeAllEvents = function removeAllEvents () {
   this._events = {};
 };
+
 
 /**
  * Get the listeners for the given object by the given event type.
@@ -88,8 +89,8 @@ var localStorage = window.localStorage;
  *
  * Versioning is simplified. You provide a string of new indexes for each new version, with the first being the primary
  * key. For primary keys, use a "++" prefix to indicate auto-increment, leave it empty if the key isn't part of the
- * object. For indexes, use a "-" index to delete a defined index, use "&" to indicate a unique index, and use "*" for a
- * multiEntry index. Examples:
+ * object. For indexes, use a "-" index to delete a defined index, use "&" to indicate a unique index, use "*" for a
+ * multiEntry index, and use "[field + anotherField]" for compound indexes. Examples:
  *
  * // Initial version, should remain the same with updates
  * db.version(1, {
@@ -105,7 +106,7 @@ var localStorage = window.localStorage;
  * // Remove the age index and add one for birthdate, add another object store with an auto-incrementing primary key
  * // that isn't part of the object, and a multiEntry index on the labels array.
  * db.version(3, {
- *   friends: 'birthdate, -age',
+ *   friends: 'birthdate, -age, [lastName + firstName]',
  *   events: '++, date, *labels'
  * });
  *
@@ -266,6 +267,7 @@ var Browserbase = (function (EventDispatcher$$1) {
   return Browserbase;
 }(EventDispatcher));
 
+
 /**
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
@@ -408,6 +410,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
   ObjectStore.prototype.where = function where (index) {
     if ( index === void 0 ) index = '';
 
+    index = index.replace(/\s/g, '');
     return new Where(this, index === this.keyPath ? '' : index);
   };
 
@@ -756,10 +759,11 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
 
         indexes.forEach(function (name) {
           if (!name) { return; }
-          if (name[0] === '-') { return store.deleteIndex(name.slice(1)); }
+          if (name[0] === '-') { return store.deleteIndex(name.replace(/^-[&*]?/, '')); }
 
           var options = {};
 
+          name = name.replace(/\s/g, '');
           if (name[0] === '&') {
             name = name.slice(1);
             options.unique = true;
@@ -767,7 +771,8 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
             name = name.slice(1);
             options.multiEntry = true;
           }
-          store.createIndex(name, name, options);
+          var keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
+          store.createIndex(name, keyPath, options);
         });
       });
 
