@@ -636,11 +636,13 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
         if (db.objectStoreNames.contains(name)) {
           store = transaction.objectStore(name);
         } else {
-          let keyPath = indexes.shift();
+          let keyPath = indexes.shift().replace(/\s/g, '');
           let storeOptions = {};
           if (keyPath.slice(0, 2) === '++') {
             keyPath = keyPath.replace('++', '');
             storeOptions.autoIncrement = true;
+          } else if (keyPath[0] === '[') {
+            keyPath = keyPath.replace(/^\[|\]$/g, '').split(/\+/);
           }
           if (keyPath) storeOptions.keyPath = keyPath;
           store = db.createObjectStore(name, storeOptions);
