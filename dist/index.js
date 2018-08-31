@@ -494,7 +494,7 @@ Where.prototype.equals = function equals (value) {
  * @return {Where}       Reference to this
  */
 Where.prototype.startsWith = function startsWith (prefix) {
-  return this.startsAt(prefix).endsAt(prefix + maxString);
+  return this.startsAt(prefix).endsAt(Array.isArray(prefix) ? prefix.concat([[]]) : prefix + maxString);
 };
 
 /**

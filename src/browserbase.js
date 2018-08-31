@@ -394,7 +394,7 @@ class Where {
    * @return {Where}         Reference to this
    */
   startsWith(prefix) {
-    return this.startsAt(prefix).endsAt(prefix + maxString);
+    return this.startsAt(prefix).endsAt(Array.isArray(prefix) ? prefix.concat([[]]) : prefix + maxString);
   }
 
   /**

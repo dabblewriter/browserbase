@@ -463,4 +463,33 @@ describe('Browserbase', () => {
     });
   });
 
+  it('should handle compound indexes with startsWith', () => {
+    db.version(1, { foo: 'key, [name + date]' });
+
+    return db.open().then(() => {
+      db.start();
+      db.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
+      db.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
+      db.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
+      db.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
+      db.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
+      return db.commit().then(() => {
+        return db.foo.where('[name+ date]').startsWith(['a']).getAll();
+      }).then(objs => {
+        expect(objs).to.deep.equal([
+          { key: 'test3', name: 'a', date: new Date('2002-01-01') },
+          { key: 'test1', name: 'a', date: new Date('2004-01-01') },
+          { key: 'test2', name: 'a', date: new Date('2005-01-01') },
+        ]);
+
+        return db.foo.where('[name+date]').startsWith(['b']).reverse().getAll();
+      }).then(objs => {
+        expect(objs).to.deep.equal([
+          { key: 'test4', name: 'b', date: new Date('2010-01-01') },
+          { key: 'test5', name: 'b', date: new Date('2000-01-01') },
+        ]);
+      });
+    });
+  });
+
 });
