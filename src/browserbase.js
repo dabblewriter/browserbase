@@ -692,9 +692,9 @@ function onOpen(browserbase) {
   db.onversionchange = event => {
     if (browserbase.dispatchCancelableEvent('versionchange')) {
       if (event.newVersion > 0) {
-        console.warn(`Another connection wants to upgrade database '${this.name}'. Closing db now to resume the upgrade.`);
+        console.warn(`Another connection wants to upgrade database '${browserbase.name}'. Closing db now to resume the upgrade.`);
       } else {
-        console.warn(`Another connection wants to delete database '${this.name}'. Closing db now to resume the delete request.`);
+        console.warn(`Another connection wants to delete database '${browserbase.name}'. Closing db now to resume the delete request.`);
       }
       browserbase.close();
     }

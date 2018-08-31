@@ -786,8 +786,6 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
 
 
 function onOpen(browserbase) {
-  var this$1 = this;
-
   // Store keyPath's for each store
   var keyPaths = {};
   var versions = Object.keys(browserbase._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; });
@@ -805,9 +803,9 @@ function onOpen(browserbase) {
   db.onversionchange = function (event) {
     if (browserbase.dispatchCancelableEvent('versionchange')) {
       if (event.newVersion > 0) {
-        console.warn(("Another connection wants to upgrade database '" + (this$1.name) + "'. Closing db now to resume the upgrade."));
+        console.warn(("Another connection wants to upgrade database '" + (browserbase.name) + "'. Closing db now to resume the upgrade."));
       } else {
-        console.warn(("Another connection wants to delete database '" + (this$1.name) + "'. Closing db now to resume the delete request."));
+        console.warn(("Another connection wants to delete database '" + (browserbase.name) + "'. Closing db now to resume the delete request."));
       }
       browserbase.close();
     }
