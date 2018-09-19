@@ -105,6 +105,7 @@ export default class Browserbase extends EventDispatcher {
       return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
     let version = Object.keys(this._versionMap).map(key => parseInt(key)).sort((a, b) => a - b).pop();
+    let upgradedFrom = null, created = false;
     return new Promise((resolve, reject) => {
       let request = window.indexedDB.open(this.name, version);
       request.onsuccess = successHandler(resolve);
@@ -114,12 +115,16 @@ export default class Browserbase extends EventDispatcher {
         this.db.onerror = errorHandler(reject);
         this.db.onabort = errorHandler(() => reject(new Error('Abort')));
         let oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
+        upgradedFrom = oldVersion;
+        created = oldVersion === 0;
         upgrade(oldVersion, request.transaction, this.db, this._versionMap, this._versionHandlers);
       };
     }).then(db => {
       this.db = db;
-      this.dispatchEvent('open');
       onOpen(this);
+      if (upgradedFrom === 0) this.dispatchEvent('create');
+      else if (upgradedFrom) this.dispatchEvent('upgrade', upgradedFrom);
+      this.dispatchEvent('open');
     });
   }
 

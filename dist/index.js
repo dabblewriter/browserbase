@@ -183,6 +183,7 @@ var Browserbase = (function (EventDispatcher$$1) {
       return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
     var version = Object.keys(this._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; }).pop();
+    var upgradedFrom = null;
     return new Promise(function (resolve, reject) {
       var request = window.indexedDB.open(this$1.name, version);
       request.onsuccess = successHandler(resolve);
@@ -192,12 +193,15 @@ var Browserbase = (function (EventDispatcher$$1) {
         this$1.db.onerror = errorHandler(reject);
         this$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); });
         var oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
+        upgradedFrom = oldVersion;
         upgrade(oldVersion, request.transaction, this$1.db, this$1._versionMap, this$1._versionHandlers);
       };
     }).then(function (db) {
       this$1.db = db;
-      this$1.dispatchEvent('open');
       onOpen(this$1);
+      if (upgradedFrom === 0) { this$1.dispatchEvent('create'); }
+      else if (upgradedFrom) { this$1.dispatchEvent('upgrade', upgradedFrom); }
+      this$1.dispatchEvent('open');
     });
   };
 
