@@ -181,7 +181,8 @@ export default class Browserbase extends EventDispatcher {
     store.dispatchEvent('change', obj, key, from);
     if (from === 'local') {
       let itemKey = `browserbase/${this.name}/${store.name}`;
-      localStorage.setItem(itemKey, key);
+      // Stringify the key since it could be a string, number, or even an array
+      localStorage.setItem(itemKey, JSON.stringify(key));
       localStorage.removeItem(itemKey);
     }
   }
@@ -721,9 +722,9 @@ function onOpen(browserbase) {
     if (event.newValue === null || event.newValue === '') return;
     if (event.key.slice(0, prefix.length) !== prefix) return;
     try {
-      let storeName = event.key.replace(prefix, '');
-      let key = event.newValue;
-      let store = browserbase[storeName];
+      const storeName = event.key.replace(prefix, '');
+      const key = JSON.parse(event.newValue);
+      const store = browserbase[storeName];
       if (store) {
         store.get(key).then((object = null) => {
           browserbase.dispatchChange(store, object, key, 'remote');

@@ -263,7 +263,8 @@ var Browserbase = (function (EventDispatcher$$1) {
     store.dispatchEvent('change', obj, key, from);
     if (from === 'local') {
       var itemKey = "browserbase/" + (this.name) + "/" + (store.name);
-      localStorage.setItem(itemKey, key);
+      // Stringify the key since it could be a string, number, or even an array
+      localStorage.setItem(itemKey, JSON.stringify(key));
       localStorage.removeItem(itemKey);
     }
   };
@@ -832,7 +833,7 @@ function onOpen(browserbase) {
     if (event.key.slice(0, prefix.length) !== prefix) { return; }
     try {
       var storeName = event.key.replace(prefix, '');
-      var key = event.newValue;
+      var key = JSON.parse(event.newValue);
       var store = browserbase[storeName];
       if (store) {
         store.get(key).then(function (object) {
