@@ -308,7 +308,8 @@ var ObjectStore = (function (EventDispatcher$$1) {
    * @return {Promise} Resolves with an array of objects
    */
   ObjectStore.prototype.getAll = function getAll () {
-    return requestToPromise(this._transStore('readonly').getAll());
+    // IE Edge does not support store.getAll, use cursor
+    return this.where().getAll();
   };
 
   /**
@@ -517,7 +518,7 @@ Where.prototype.limit = function limit (count) {
  * @return {Where} Reference to this
  */
 Where.prototype.reverse = function reverse () {
-  this._direction = 'prev';
+  this._direction = (this._direction === 'next' ? 'prev' : 'next');
   return this;
 };
 
@@ -542,17 +543,9 @@ Where.prototype.toRange = function toRange () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAll = function getAll () {
-  var range = this.toRange();
-  // Handle reverse with getAll and get
-  if (this._direction === 'prev') {
-    var results = [];
-    if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.forEach(function (obj) { return results.push(obj); }).then(function () { return results; });
-  }
-
-  var store = this.store._transStore('readonly');
-  var source = this.index ? store.index(this.index) : store;
-  return requestToPromise(source.getAll(range, this._limit));
+  var results = [];
+  if (this._limit <= 0) { return Promise.resolve(results); }
+  return this.forEach(function (obj) { return results.push(obj); }).then(function () { return results; });
 };
 
 /**
@@ -560,17 +553,9 @@ Where.prototype.getAll = function getAll () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAllKeys = function getAllKeys () {
-  var range = this.toRange();
-  // Handle reverse with getAll and get
-  if (this._direction === 'prev') {
-    var results = [];
-    if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.cursor(function (cursor) { return results.push(cursor.key); }, 'readonly', true).then(function () { return results; });
-  }
-
-  var store = this.store._transStore('readonly');
-  var source = this.index ? store.index(this.index) : store;
-  return requestToPromise(source.getAllKeys(range, this._limit));
+  var results = [];
+  if (this._limit <= 0) { return Promise.resolve(results); }
+  return this.cursor(function (cursor) { return results.push(cursor.key); }, 'readonly', true).then(function () { return results; });
 };
 
 /**
@@ -632,7 +617,8 @@ Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
     var store = this$1.store._transStore(mode);
     var source = this$1.index ? store.index(this$1.index) : store;
     var method = keyCursor ? 'openKeyCursor' : 'openCursor';
-    var request = source[method](range, this$1._direction);
+    // IE Edge crashes if undefined parameters are passed but work with null just fine
+    var request = source[method](range || null, this$1._direction);
     var count = 0;
     request.onsuccess = function (event) {
       var cursor = event.target.result;
