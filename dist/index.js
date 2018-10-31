@@ -187,11 +187,11 @@ var Browserbase = (function (EventDispatcher$$1) {
     return new Promise(function (resolve, reject) {
       var request = window.indexedDB.open(this$1.name, version);
       request.onsuccess = successHandler(resolve);
-      request.onerror = errorHandler(reject);
+      request.onerror = errorHandler(reject, this$1);
       request.onupgradeneeded = function (event) {
         this$1.db = request.result;
-        this$1.db.onerror = errorHandler(reject);
-        this$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); });
+        this$1.db.onerror = errorHandler(reject, this$1);
+        this$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); }, this$1);
         var oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
         upgrade(oldVersion, request.transaction, this$1.db, this$1._versionMap, this$1._versionHandlers);
@@ -226,14 +226,22 @@ var Browserbase = (function (EventDispatcher$$1) {
     if ( mode === void 0 ) mode = 'readwrite';
 
     if (!storeNames) { storeNames = this.db.objectStoreNames; }
-    var trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
-    return this.current.promise = requestToPromise(this.current).then(function (result) {
-      if (this$1.current === trans) { this$1.current = null; }
-      return result;
-    }, function (err) {
-      if (this$1.current === trans) { this$1.current = null; }
-      return Promise.reject(err);
-    });
+    try {
+      var trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
+      return this.current.promise = requestToPromise(this.current, null, this).then(function (result) {
+        if (this$1.current === trans) { this$1.current = null; }
+        return result;
+      }, function (err) {
+        if (this$1.current === trans) { this$1.current = null; }
+        this$1.dispatchEvent('error', err);
+        return Promise.reject(err);
+      });
+    } catch (err) {
+      Promise.resolve().then(function () {
+        this$1.dispatchEvent('error', err);
+      });
+      throw err;
+    }
   };
 
   /**
@@ -290,8 +298,17 @@ var ObjectStore = (function (EventDispatcher$$1) {
   ObjectStore.prototype.constructor = ObjectStore;
 
   ObjectStore.prototype._transStore = function _transStore (mode, index) {
-    var trans = this.db.current || this.db.db.transaction(this.name, mode);
-    return trans.objectStore(this.name);
+    var this$1 = this;
+
+    try {
+      var trans = this.db.current || this.db.db.transaction(this.name, mode);
+      return trans.objectStore(this.name);
+    } catch (err) {
+      Promise.resolve().then(function () {
+        this$1.db.dispatchEvent('error', err);
+      });
+      throw err;
+    }
   };
 
   /**
@@ -300,7 +317,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
    * @return {Promise}  Resolves with the object being retreived
    */
   ObjectStore.prototype.get = function get (key) {
-    return requestToPromise(this._transStore('readonly').get(key));
+    return requestToPromise(this._transStore('readonly').get(key), null, this.db);
   };
 
   /**
@@ -308,8 +325,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
    * @return {Promise} Resolves with an array of objects
    */
   ObjectStore.prototype.getAll = function getAll () {
-    // IE Edge does not support store.getAll, use cursor
-    return this.where().getAll();
+    return requestToPromise(this._transStore('readonly').getAll(), null, this.db);
   };
 
   /**
@@ -317,7 +333,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
    * @return {Promise} Resolves with a number
    */
   ObjectStore.prototype.count = function count () {
-    return requestToPromise(this._transStore('readonly').count());
+    return requestToPromise(this._transStore('readonly').count(), null, this.db);
   };
 
   /**
@@ -330,7 +346,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
     var this$1 = this;
 
     var store = this._transStore('readwrite');
-    return requestToPromise(store.add(obj, key), store.transaction).then(function (key) {
+    return requestToPromise(store.add(obj, key), store.transaction, this.db).then(function (key) {
       this$1.db.dispatchChange(this$1, obj, key);
       return key;
     });
@@ -346,7 +362,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
 
     var store = this._transStore('readwrite');
     return Promise.all(array.map(function (obj) {
-      return requestToPromise(store.add(obj), store.transaction).then(function (key) {
+      return requestToPromise(store.add(obj), store.transaction, this$1.db).then(function (key) {
         this$1.db.dispatchChange(this$1, obj, key);
       });
     }));
@@ -362,7 +378,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
     var this$1 = this;
 
     var store = this._transStore('readwrite');
-    return requestToPromise(store.put(obj, key), store.transaction).then(function (key) {
+    return requestToPromise(store.put(obj, key), store.transaction, this.db).then(function (key) {
       this$1.db.dispatchChange(this$1, obj, key);
       return key;
     });
@@ -378,7 +394,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
 
     var store = this._transStore('readwrite');
     return Promise.all(array.map(function (obj) {
-      return requestToPromise(store.put(obj), store.transaction).then(function (key) {
+      return requestToPromise(store.put(obj), store.transaction, this$1.db).then(function (key) {
         this$1.db.dispatchChange(this$1, obj, key);
       });
     }));
@@ -393,7 +409,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
     var this$1 = this;
 
     var store = this._transStore('readwrite');
-    return requestToPromise(store.delete(key), store.transaction).then(function () {
+    return requestToPromise(store.delete(key), store.transaction, this.db).then(function () {
       this$1.db.dispatchChange(this$1, null, key);
     });
   };
@@ -518,7 +534,7 @@ Where.prototype.limit = function limit (count) {
  * @return {Where} Reference to this
  */
 Where.prototype.reverse = function reverse () {
-  this._direction = (this._direction === 'next' ? 'prev' : 'next');
+  this._direction = 'prev';
   return this;
 };
 
@@ -543,9 +559,17 @@ Where.prototype.toRange = function toRange () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAll = function getAll () {
-  var results = [];
-  if (this._limit <= 0) { return Promise.resolve(results); }
-  return this.forEach(function (obj) { return results.push(obj); }).then(function () { return results; });
+  var range = this.toRange();
+  // Handle reverse with getAll and get
+  if (this._direction === 'prev') {
+    var results = [];
+    if (this._limit <= 0) { return Promise.resolve(results); }
+    return this.forEach(function (obj) { return results.push(obj); }).then(function () { return results; });
+  }
+
+  var store = this.store._transStore('readonly');
+  var source = this.index ? store.index(this.index) : store;
+  return requestToPromise(source.getAll(range, this._limit), null, this.store.db);
 };
 
 /**
@@ -553,9 +577,17 @@ Where.prototype.getAll = function getAll () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAllKeys = function getAllKeys () {
-  var results = [];
-  if (this._limit <= 0) { return Promise.resolve(results); }
-  return this.cursor(function (cursor) { return results.push(cursor.key); }, 'readonly', true).then(function () { return results; });
+  var range = this.toRange();
+  // Handle reverse with getAll and get
+  if (this._direction === 'prev') {
+    var results = [];
+    if (this._limit <= 0) { return Promise.resolve(results); }
+    return this.cursor(function (cursor) { return results.push(cursor.key); }, 'readonly', true).then(function () { return results; });
+  }
+
+  var store = this.store._transStore('readonly');
+  var source = this.index ? store.index(this.index) : store;
+  return requestToPromise(source.getAllKeys(range, this._limit), null, this.store.db);
 };
 
 /**
@@ -583,7 +615,7 @@ Where.prototype.count = function count () {
   var range = this.toRange();
   var store = this.store._transStore('readonly');
   var source = this.index ? store.index(this.index) : store;
-  return requestToPromise(source.count(range));
+  return requestToPromise(source.count(range), null, this.store.db);
 };
 
 /**
@@ -596,7 +628,7 @@ Where.prototype.deleteAll = function deleteAll () {
   // Uses a cursor to delete so that each item can get a change event dispatched for it
   return this.map(function (object, cursor, trans) {
     var key = cursor.primaryKey;
-    return requestToPromise(cursor.delete(), trans).then(function () {
+    return requestToPromise(cursor.delete(), trans, this$1.store.db).then(function () {
       this$1.store.db.dispatchChange(this$1.store, null, key);
     });
   }, 'readwrite').then(function (promises) { return Promise.all(promises); }).then(function () {});
@@ -617,8 +649,7 @@ Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
     var store = this$1.store._transStore(mode);
     var source = this$1.index ? store.index(this$1.index) : store;
     var method = keyCursor ? 'openKeyCursor' : 'openCursor';
-    // IE Edge crashes if undefined parameters are passed but work with null just fine
-    var request = source[method](range || null, this$1._direction);
+    var request = source[method](range, this$1._direction);
     var count = 0;
     request.onsuccess = function (event) {
       var cursor = event.target.result;
@@ -631,7 +662,7 @@ Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
         resolve();
       }
     };
-    request.onerror = errorHandler(reject);
+    request.onerror = errorHandler(reject, this$1.store.db);
   });
 };
 
@@ -648,11 +679,11 @@ Where.prototype.update = function update (iterator) {
     var key = cursor.primaryKey;
     var newValue = iterator(object, cursor);
     if (newValue === null) {
-      return requestToPromise(cursor.delete()).then(function () {
+      return requestToPromise(cursor.delete(), trans, this$1.store.db).then(function () {
         this$1.store.db.dispatchChange(this$1.store, null, key);
       });
     } else if (newValue !== undefined) {
-      return requestToPromise(cursor.update(newValue), trans).then(function () {
+      return requestToPromise(cursor.update(newValue), trans, this$1.store.db).then(function () {
         this$1.store.db.dispatchChange(this$1.store, newValue, key);
       });
     } else {
@@ -690,10 +721,10 @@ Where.prototype.map = function map (iterator, mode) {
 
 
 
-function requestToPromise(request, transaction) {
+function requestToPromise(request, transaction, db) {
   return new Promise(function (resolve, reject) {
     if (transaction) {
-      if (!transaction.promise) { transaction.promise = requestToPromise(transaction); }
+      if (!transaction.promise) { transaction.promise = requestToPromise(transaction, null, db); }
       transaction.promise = transaction.promise.then(function () { return resolve(request.result); }, function (err) {
         reject(request.error || err);
         return Promise.reject(err);
@@ -702,7 +733,7 @@ function requestToPromise(request, transaction) {
       request.onsuccess = successHandler(resolve);
     }
     if (request.oncomplete === null) { request.oncomplete = successHandler(resolve); }
-    if (request.onerror === null) { request.onerror = errorHandler(reject); }
+    if (request.onerror === null) { request.onerror = errorHandler(reject, db); }
     if (request.onabort === null) { request.onabort = function () { return reject(new Error('Abort')); }; }
   });
 }
@@ -711,8 +742,11 @@ function successHandler(resolve) {
   return function (event) { return resolve(event.target.result); };
 }
 
-function errorHandler(reject) {
-  return function (event) { return reject(event.target.error); };
+function errorHandler(reject, db) {
+  return function (event) {
+    reject(event.target.error);
+    db.dispatchEvent('error', event.target.error);
+  };
 }
 
 function safariMultiStoreFix(storeNames) {

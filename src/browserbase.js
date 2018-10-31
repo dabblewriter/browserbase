@@ -109,11 +109,11 @@ export default class Browserbase extends EventDispatcher {
     return new Promise((resolve, reject) => {
       let request = window.indexedDB.open(this.name, version);
       request.onsuccess = successHandler(resolve);
-      request.onerror = errorHandler(reject);
+      request.onerror = errorHandler(reject, this);
       request.onupgradeneeded = event => {
         this.db = request.result;
-        this.db.onerror = errorHandler(reject);
-        this.db.onabort = errorHandler(() => reject(new Error('Abort')));
+        this.db.onerror = errorHandler(reject, this);
+        this.db.onabort = errorHandler(() => reject(new Error('Abort')), this);
         let oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
         created = oldVersion === 0;
@@ -146,14 +146,22 @@ export default class Browserbase extends EventDispatcher {
    */
   start(storeNames, mode = 'readwrite') {
     if (!storeNames) storeNames = this.db.objectStoreNames;
-    let trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
-    return this.current.promise = requestToPromise(this.current).then(result => {
-      if (this.current === trans) this.current = null;
-      return result;
-    }, err => {
-      if (this.current === trans) this.current = null;
-      return Promise.reject(err);
-    });
+    try {
+      let trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
+      return this.current.promise = requestToPromise(this.current, null, this).then(result => {
+        if (this.current === trans) this.current = null;
+        return result;
+      }, err => {
+        if (this.current === trans) this.current = null;
+        this.dispatchEvent('error', err);
+        return Promise.reject(err);
+      });
+    } catch (err) {
+      Promise.resolve().then(() => {
+        this.dispatchEvent('error', err);
+      });
+      throw err;
+    }
   }
 
   /**
@@ -204,8 +212,15 @@ class ObjectStore extends EventDispatcher {
   }
 
   _transStore(mode, index) {
-    let trans = this.db.current || this.db.db.transaction(this.name, mode);
-    return trans.objectStore(this.name);
+    try {
+      let trans = this.db.current || this.db.db.transaction(this.name, mode);
+      return trans.objectStore(this.name);
+    } catch (err) {
+      Promise.resolve().then(() => {
+        this.db.dispatchEvent('error', err);
+      });
+      throw err;
+    }
   }
 
   /**
@@ -214,7 +229,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise}  Resolves with the object being retreived
    */
   get(key) {
-    return requestToPromise(this._transStore('readonly').get(key));
+    return requestToPromise(this._transStore('readonly').get(key), null, this.db);
   }
 
   /**
@@ -222,7 +237,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise} Resolves with an array of objects
    */
   getAll() {
-    return requestToPromise(this._transStore('readonly').getAll());
+    return requestToPromise(this._transStore('readonly').getAll(), null, this.db);
   }
 
   /**
@@ -230,7 +245,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise} Resolves with a number
    */
   count() {
-    return requestToPromise(this._transStore('readonly').count());
+    return requestToPromise(this._transStore('readonly').count(), null, this.db);
   }
 
   /**
@@ -241,7 +256,7 @@ class ObjectStore extends EventDispatcher {
    */
   add(obj, key) {
     let store = this._transStore('readwrite');
-    return requestToPromise(store.add(obj, key), store.transaction).then(key => {
+    return requestToPromise(store.add(obj, key), store.transaction, this.db).then(key => {
       this.db.dispatchChange(this, obj, key);
       return key;
     });
@@ -255,7 +270,7 @@ class ObjectStore extends EventDispatcher {
   bulkAdd(array) {
     let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
-      return requestToPromise(store.add(obj), store.transaction).then(key => {
+      return requestToPromise(store.add(obj), store.transaction, this.db).then(key => {
         this.db.dispatchChange(this, obj, key);
       });
     }));
@@ -269,7 +284,7 @@ class ObjectStore extends EventDispatcher {
    */
   put(obj, key) {
     let store = this._transStore('readwrite');
-    return requestToPromise(store.put(obj, key), store.transaction).then(key => {
+    return requestToPromise(store.put(obj, key), store.transaction, this.db).then(key => {
       this.db.dispatchChange(this, obj, key);
       return key;
     });
@@ -283,7 +298,7 @@ class ObjectStore extends EventDispatcher {
   bulkPut(array) {
     let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
-      return requestToPromise(store.put(obj), store.transaction).then(key => {
+      return requestToPromise(store.put(obj), store.transaction, this.db).then(key => {
         this.db.dispatchChange(this, obj, key);
       });
     }));
@@ -296,7 +311,7 @@ class ObjectStore extends EventDispatcher {
    */
   delete(key) {
     let store = this._transStore('readwrite');
-    return requestToPromise(store.delete(key), store.transaction).then(() => {
+    return requestToPromise(store.delete(key), store.transaction, this.db).then(() => {
       this.db.dispatchChange(this, null, key);
     });
   }
@@ -453,7 +468,7 @@ class Where {
 
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
-    return requestToPromise(source.getAll(range, this._limit));
+    return requestToPromise(source.getAll(range, this._limit), null, this.store.db);
   }
 
   /**
@@ -471,7 +486,7 @@ class Where {
 
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
-    return requestToPromise(source.getAllKeys(range, this._limit));
+    return requestToPromise(source.getAllKeys(range, this._limit), null, this.store.db);
   }
 
   /**
@@ -499,7 +514,7 @@ class Where {
     let range = this.toRange();
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
-    return requestToPromise(source.count(range));
+    return requestToPromise(source.count(range), null, this.store.db);
   }
 
   /**
@@ -510,7 +525,7 @@ class Where {
     // Uses a cursor to delete so that each item can get a change event dispatched for it
     return this.map((object, cursor, trans) => {
       let key = cursor.primaryKey;
-      return requestToPromise(cursor.delete(), trans).then(() => {
+      return requestToPromise(cursor.delete(), trans, this.store.db).then(() => {
         this.store.db.dispatchChange(this.store, null, key);
       });
     }, 'readwrite').then(promises => Promise.all(promises)).then(() => {});
@@ -540,7 +555,7 @@ class Where {
           resolve();
         }
       };
-      request.onerror = errorHandler(reject);
+      request.onerror = errorHandler(reject, this.store.db);
     });
   }
 
@@ -555,11 +570,11 @@ class Where {
       let key = cursor.primaryKey;
       let newValue = iterator(object, cursor);
       if (newValue === null) {
-        return requestToPromise(cursor.delete()).then(() => {
+        return requestToPromise(cursor.delete(), trans, this.store.db).then(() => {
           this.store.db.dispatchChange(this.store, null, key);
         });
       } else if (newValue !== undefined) {
-        return requestToPromise(cursor.update(newValue), trans).then(() => {
+        return requestToPromise(cursor.update(newValue), trans, this.store.db).then(() => {
           this.store.db.dispatchChange(this.store, newValue, key);
         });
       } else {
@@ -594,10 +609,10 @@ class Where {
 
 
 
-function requestToPromise(request, transaction) {
+function requestToPromise(request, transaction, db) {
   return new Promise((resolve, reject) => {
     if (transaction) {
-      if (!transaction.promise) transaction.promise = requestToPromise(transaction);
+      if (!transaction.promise) transaction.promise = requestToPromise(transaction, null, db);
       transaction.promise = transaction.promise.then(() => resolve(request.result), err => {
         reject(request.error || err);
         return Promise.reject(err);
@@ -606,7 +621,7 @@ function requestToPromise(request, transaction) {
       request.onsuccess = successHandler(resolve);
     }
     if (request.oncomplete === null) request.oncomplete = successHandler(resolve);
-    if (request.onerror === null) request.onerror = errorHandler(reject);
+    if (request.onerror === null) request.onerror = errorHandler(reject, db);
     if (request.onabort === null) request.onabort = () => reject(new Error('Abort'));
   });
 }
@@ -615,8 +630,11 @@ function successHandler(resolve) {
   return event => resolve(event.target.result);
 }
 
-function errorHandler(reject) {
-  return event => reject(event.target.error);
+function errorHandler(reject, db) {
+  return event => {
+    reject(event.target.error);
+    db.dispatchEvent('error', event.target.error);
+  };
 }
 
 function safariMultiStoreFix(storeNames) {
