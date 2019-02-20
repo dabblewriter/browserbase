@@ -130,9 +130,9 @@ var localStorage = window.localStorage;
  *   console.warn('There was an error opening the database:', err);
  * });
  */
-var Browserbase = (function (EventDispatcher$$1) {
+var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
   function Browserbase(name) {
-    EventDispatcher$$1.call(this);
+    EventDispatcher.call(this);
     this.name = name;
     this.db = null;
     this.current = null;
@@ -141,8 +141,8 @@ var Browserbase = (function (EventDispatcher$$1) {
     this._onStorage = null;
   }
 
-  if ( EventDispatcher$$1 ) Browserbase.__proto__ = EventDispatcher$$1;
-  Browserbase.prototype = Object.create( EventDispatcher$$1 && EventDispatcher$$1.prototype );
+  if ( EventDispatcher ) Browserbase.__proto__ = EventDispatcher;
+  Browserbase.prototype = Object.create( EventDispatcher && EventDispatcher.prototype );
   Browserbase.prototype.constructor = Browserbase;
 
   /**
@@ -194,7 +194,7 @@ var Browserbase = (function (EventDispatcher$$1) {
         this$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); }, this$1);
         var oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
-        upgrade(oldVersion, request.transaction, this$1.db, this$1._versionMap, this$1._versionHandlers);
+        upgrade(oldVersion, request.transaction, this$1.db, this$1._versionMap, this$1._versionHandlers, this$1);
       };
     }).then(function (db) {
       this$1.db = db;
@@ -227,7 +227,9 @@ var Browserbase = (function (EventDispatcher$$1) {
 
     if (!storeNames) { storeNames = this.db.objectStoreNames; }
     try {
-      var trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
+      var trans = this.current = storeNames instanceof IDBTransaction
+        ? storeNames
+        : this.db.transaction(safariMultiStoreFix(storeNames), mode);
       return this.current.promise = requestToPromise(this.current, null, this).then(function (result) {
         if (this$1.current === trans) { this$1.current = null; }
         return result;
@@ -277,6 +279,17 @@ var Browserbase = (function (EventDispatcher$$1) {
     }
   };
 
+  /**
+   * Creates or updates a store with the given indexesString. If null will delete the store.
+   * @param  {String} storeName     The store name
+   * @param  {String} indexesString The string definition of the indexes to add to the store
+   * @return {Promise}           Resolves with an array which is the return result of each iteration
+   */
+  Browserbase.prototype.upgradeStore = function upgradeStore$1 (storeName, indexesString) {
+    if (!this.current) { this.start(); }
+    upgradeStore(this.db, this.current, storeName, indexesString);
+  };
+
   return Browserbase;
 }(EventDispatcher));
 
@@ -285,16 +298,16 @@ var Browserbase = (function (EventDispatcher$$1) {
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-var ObjectStore = (function (EventDispatcher$$1) {
+var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
   function ObjectStore(db, name, keyPath) {
-    EventDispatcher$$1.call(this);
+    EventDispatcher.call(this);
     this.db = db;
     this.name = name;
     this.keyPath = keyPath;
   }
 
-  if ( EventDispatcher$$1 ) ObjectStore.__proto__ = EventDispatcher$$1;
-  ObjectStore.prototype = Object.create( EventDispatcher$$1 && EventDispatcher$$1.prototype );
+  if ( EventDispatcher ) ObjectStore.__proto__ = EventDispatcher;
+  ObjectStore.prototype = Object.create( EventDispatcher && EventDispatcher.prototype );
   ObjectStore.prototype.constructor = ObjectStore;
 
   ObjectStore.prototype._transStore = function _transStore (mode, index) {
@@ -357,7 +370,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
    * @param {Array} array The array of objects you want to add to the store
    * @return {Promise}
    */
-  ObjectStore.prototype.bulkAdd = function bulkAdd (array) {
+  ObjectStore.prototype.addAll = function addAll (array) {
     var this$1 = this;
 
     var store = this._transStore('readwrite');
@@ -366,6 +379,16 @@ var ObjectStore = (function (EventDispatcher$$1) {
         this$1.db.dispatchChange(this$1, obj, key);
       });
     }));
+  };
+
+  /**
+   * Adds an array of objects to the store in once transaction. You can also call startTransaction and use add(). Alias
+   * of addAll().
+   * @param {Array} array The array of objects you want to add to the store
+   * @return {Promise}
+   */
+  ObjectStore.prototype.bulkAdd = function bulkAdd (array) {
+    return this.addAll(array);
   };
 
   /**
@@ -389,7 +412,7 @@ var ObjectStore = (function (EventDispatcher$$1) {
    * @param {Array} array The array of objects you want to save to the store
    * @return {Promise}
    */
-  ObjectStore.prototype.bulkPut = function bulkPut (array) {
+  ObjectStore.prototype.putAll = function putAll (array) {
     var this$1 = this;
 
     var store = this._transStore('readwrite');
@@ -398,6 +421,16 @@ var ObjectStore = (function (EventDispatcher$$1) {
         this$1.db.dispatchChange(this$1, obj, key);
       });
     }));
+  };
+
+  /**
+   * Saves an array of objects to the store in once transaction. You can also call startTransaction and use put(). Alias
+   * of putAll().
+   * @param {Array} array The array of objects you want to save to the store
+   * @return {Promise}
+   */
+  ObjectStore.prototype.bulkPut = function bulkPut (array) {
+    return this.putAll(array);
   };
 
   /**
@@ -754,75 +787,62 @@ function safariMultiStoreFix(storeNames) {
 }
 
 
-function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
+function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, browserbase) {
   var versions = Object.keys(versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; });
   versions.forEach(function (version) {
-    if (oldVersion < version) {
-      var stores = versionMap[version];
-      Object.keys(stores).forEach(function (name) {
-        var value = stores[name];
-        var indexes = value && value.split(/\s*,\s*/);
-        var store;
+    if (version <= oldVersion) { return; }
+    var stores = versionMap[version];
+    Object.keys(stores).forEach(function (name) {
+      var indexesString = stores[name];
+      upgradeStore(db, transaction, name, indexesString);
+    });
 
-        if (value === null) {
-          db.deleteObjectStore(name);
-          return;
-        }
-
-        if (db.objectStoreNames.contains(name)) {
-          store = transaction.objectStore(name);
-        } else {
-          var keyPath = indexes.shift().replace(/\s/g, '');
-          var storeOptions = {};
-          if (keyPath.slice(0, 2) === '++') {
-            keyPath = keyPath.replace('++', '');
-            storeOptions.autoIncrement = true;
-          } else if (keyPath[0] === '[') {
-            keyPath = keyPath.replace(/^\[|\]$/g, '').split(/\+/);
-          }
-          if (keyPath) { storeOptions.keyPath = keyPath; }
-          store = db.createObjectStore(name, storeOptions);
-        }
-
-        indexes.forEach(function (name) {
-          if (!name) { return; }
-          if (name[0] === '-') { return store.deleteIndex(name.replace(/^-[&*]?/, '')); }
-
-          var options = {};
-
-          name = name.replace(/\s/g, '');
-          if (name[0] === '&') {
-            name = name.slice(1);
-            options.unique = true;
-          } else if (name[0] === '*') {
-            name = name.slice(1);
-            options.multiEntry = true;
-          }
-          var keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
-          store.createIndex(name, keyPath, options);
-        });
-      });
-
-      var handler = versionHandlers[version];
-      if (handler) { handler(oldVersion, transaction); }
+    var handler = versionHandlers[version];
+    if (handler) {
+      // Ensure browserbase has the current object stores for working with in the handler
+      addStores(browserbase, db, transaction);
+      handler(oldVersion, transaction);
     }
   });
 }
 
 
-function onOpen(browserbase) {
-  // Store keyPath's for each store
-  var keyPaths = {};
-  var versions = Object.keys(browserbase._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; });
-  versions.forEach(function (version) {
-    var stores = browserbase._versionMap[version];
-    Object.keys(stores).forEach(function (name) {
-      if (keyPaths[name] || !stores[name]) { return; }
-      var indexes = stores[name].split(/\s*,\s*/);
-      keyPaths[name] = indexes[0].replace(/^\+\+/, '');
-    });
-  });
+function upgradeStore(db, transaction, storeName, indexesString) {
+  var indexes = indexesString && indexesString.split(/\s*,\s*/);
+  var store;
 
+  if (indexesString === null) {
+    db.deleteObjectStore(storeName);
+    return;
+  }
+
+  if (db.objectStoreNames.contains(storeName)) {
+    store = transaction.objectStore(storeName);
+  } else {
+    store = db.createObjectStore(storeName, getStoreOptions(indexes.shift()));
+  }
+
+  indexes.forEach(function (name) {
+    if (!name) { return; }
+    if (name[0] === '-') { return store.deleteIndex(name.replace(/^-[&*]?/, '')); }
+
+    var options = {};
+
+    name = name.replace(/\s/g, '');
+    if (name[0] === '&') {
+      name = name.slice(1);
+      options.unique = true;
+    } else if (name[0] === '*') {
+      name = name.slice(1);
+      options.multiEntry = true;
+    }
+    var keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
+    store.createIndex(name, keyPath, options);
+  });
+}
+
+
+function onOpen(browserbase) {
   var db = browserbase.db;
 
   db.onversionchange = function (event) {
@@ -871,18 +891,36 @@ function onOpen(browserbase) {
 
   window.addEventListener('storage', browserbase._onStorage);
 
+  // Store keyPath's for each store
+  addStores(browserbase, db, db.transaction(safariMultiStoreFix(db.objectStoreNames), 'readonly'));
+}
+
+
+function addStores(browserbase, db, transaction) {
   var names = db.objectStoreNames;
   for (var i = 0; i < names.length; i++) {
     var name = names[i];
-    browserbase[name] = new ObjectStore(browserbase, name, keyPaths[name]);
+    browserbase[name] = new ObjectStore(browserbase, name, transaction.objectStore(name).keyPath);
   }
 }
-
 
 function onClose(browserbase) {
   window.removeEventListener('storage', browserbase._onStorage);
   browserbase.db = null;
   browserbase.dispatchEvent('close');
+}
+
+function getStoreOptions(keyString) {
+  var keyPath = keyString.replace(/\s/g, '');
+  var storeOptions = {};
+  if (keyPath.slice(0, 2) === '++') {
+    keyPath = keyPath.replace('++', '');
+    storeOptions.autoIncrement = true;
+  } else if (keyPath[0] === '[') {
+    keyPath = keyPath.replace(/^\[|\]$/g, '').split(/\+/);
+  }
+  if (keyPath) { storeOptions.keyPath = keyPath; }
+  return storeOptions;
 }
 
 exports.EventDispatcher = EventDispatcher;

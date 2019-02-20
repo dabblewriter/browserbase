@@ -117,7 +117,7 @@ export default class Browserbase extends EventDispatcher {
         let oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
         created = oldVersion === 0;
-        upgrade(oldVersion, request.transaction, this.db, this._versionMap, this._versionHandlers);
+        upgrade(oldVersion, request.transaction, this.db, this._versionMap, this._versionHandlers, this);
       };
     }).then(db => {
       this.db = db;
@@ -147,7 +147,9 @@ export default class Browserbase extends EventDispatcher {
   start(storeNames, mode = 'readwrite') {
     if (!storeNames) storeNames = this.db.objectStoreNames;
     try {
-      let trans = this.current = this.db.transaction(safariMultiStoreFix(storeNames), mode);
+      const trans = this.current = storeNames instanceof IDBTransaction
+        ? storeNames
+        : this.db.transaction(safariMultiStoreFix(storeNames), mode);
       return this.current.promise = requestToPromise(this.current, null, this).then(result => {
         if (this.current === trans) this.current = null;
         return result;
@@ -193,6 +195,17 @@ export default class Browserbase extends EventDispatcher {
       localStorage.setItem(itemKey, JSON.stringify(key));
       localStorage.removeItem(itemKey);
     }
+  }
+
+  /**
+   * Creates or updates a store with the given indexesString. If null will delete the store.
+   * @param  {String} storeName     The store name
+   * @param  {String} indexesString The string definition of the indexes to add to the store
+   * @return {Promise}           Resolves with an array which is the return result of each iteration
+   */
+  upgradeStore(storeName, indexesString) {
+    if (!this.current) this.start();
+    upgradeStore(this.db, this.current, storeName, indexesString);
   }
 
 }
@@ -267,13 +280,23 @@ class ObjectStore extends EventDispatcher {
    * @param {Array} array The array of objects you want to add to the store
    * @return {Promise}
    */
-  bulkAdd(array) {
+  addAll(array) {
     let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
       return requestToPromise(store.add(obj), store.transaction, this.db).then(key => {
         this.db.dispatchChange(this, obj, key);
       });
     }));
+  }
+
+  /**
+   * Adds an array of objects to the store in once transaction. You can also call startTransaction and use add(). Alias
+   * of addAll().
+   * @param {Array} array The array of objects you want to add to the store
+   * @return {Promise}
+   */
+  bulkAdd(array) {
+    return this.addAll(array);
   }
 
   /**
@@ -295,13 +318,23 @@ class ObjectStore extends EventDispatcher {
    * @param {Array} array The array of objects you want to save to the store
    * @return {Promise}
    */
-  bulkPut(array) {
+  putAll(array) {
     let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
       return requestToPromise(store.put(obj), store.transaction, this.db).then(key => {
         this.db.dispatchChange(this, obj, key);
       });
     }));
+  }
+
+  /**
+   * Saves an array of objects to the store in once transaction. You can also call startTransaction and use put(). Alias
+   * of putAll().
+   * @param {Array} array The array of objects you want to save to the store
+   * @return {Promise}
+   */
+  bulkPut(array) {
+    return this.putAll(array);
   }
 
   /**
@@ -642,76 +675,63 @@ function safariMultiStoreFix(storeNames) {
 }
 
 
-function upgrade(oldVersion, transaction, db, versionMap, versionHandlers) {
-  let versions = Object.keys(versionMap).map(key => parseInt(key)).sort((a, b) => a - b);
+function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, browserbase) {
+  const versions = Object.keys(versionMap).map(key => parseInt(key)).sort((a, b) => a - b);
   versions.forEach(version => {
-    if (oldVersion < version) {
-      let stores = versionMap[version];
-      Object.keys(stores).forEach(name => {
-        let value = stores[name];
-        let indexes = value && value.split(/\s*,\s*/);
-        let store;
+    if (version <= oldVersion) return;
+    const stores = versionMap[version];
+    Object.keys(stores).forEach(name => {
+      const indexesString = stores[name];
+      upgradeStore(db, transaction, name, indexesString);
+    });
 
-        if (value === null) {
-          db.deleteObjectStore(name);
-          return;
-        }
-
-        if (db.objectStoreNames.contains(name)) {
-          store = transaction.objectStore(name);
-        } else {
-          let keyPath = indexes.shift().replace(/\s/g, '');
-          let storeOptions = {};
-          if (keyPath.slice(0, 2) === '++') {
-            keyPath = keyPath.replace('++', '');
-            storeOptions.autoIncrement = true;
-          } else if (keyPath[0] === '[') {
-            keyPath = keyPath.replace(/^\[|\]$/g, '').split(/\+/);
-          }
-          if (keyPath) storeOptions.keyPath = keyPath;
-          store = db.createObjectStore(name, storeOptions);
-        }
-
-        indexes.forEach(name => {
-          if (!name) return;
-          if (name[0] === '-') return store.deleteIndex(name.replace(/^-[&*]?/, ''));
-
-          let options = {};
-
-          name = name.replace(/\s/g, '');
-          if (name[0] === '&') {
-            name = name.slice(1);
-            options.unique = true;
-          } else if (name[0] === '*') {
-            name = name.slice(1);
-            options.multiEntry = true;
-          }
-          let keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
-          store.createIndex(name, keyPath, options);
-        });
-      });
-
-      let handler = versionHandlers[version];
-      if (handler) handler(oldVersion, transaction);
+    const handler = versionHandlers[version];
+    if (handler) {
+      // Ensure browserbase has the current object stores for working with in the handler
+      addStores(browserbase, db, transaction);
+      handler(oldVersion, transaction);
     }
   })
 }
 
 
-function onOpen(browserbase) {
-  // Store keyPath's for each store
-  let keyPaths = {};
-  let versions = Object.keys(browserbase._versionMap).map(key => parseInt(key)).sort((a, b) => a - b);
-  versions.forEach(version => {
-    let stores = browserbase._versionMap[version];
-    Object.keys(stores).forEach(name => {
-      if (keyPaths[name] || !stores[name]) return;
-      let indexes = stores[name].split(/\s*,\s*/);
-      keyPaths[name] = indexes[0].replace(/^\+\+/, '');
-    });
-  });
+function upgradeStore(db, transaction, storeName, indexesString) {
+  const indexes = indexesString && indexesString.split(/\s*,\s*/);
+  let store;
 
-  let db = browserbase.db;
+  if (indexesString === null) {
+    db.deleteObjectStore(storeName);
+    return;
+  }
+
+  if (db.objectStoreNames.contains(storeName)) {
+    store = transaction.objectStore(storeName);
+  } else {
+    store = db.createObjectStore(storeName, getStoreOptions(indexes.shift()));
+  }
+
+  indexes.forEach(name => {
+    if (!name) return;
+    if (name[0] === '-') return store.deleteIndex(name.replace(/^-[&*]?/, ''));
+
+    let options = {};
+
+    name = name.replace(/\s/g, '');
+    if (name[0] === '&') {
+      name = name.slice(1);
+      options.unique = true;
+    } else if (name[0] === '*') {
+      name = name.slice(1);
+      options.multiEntry = true;
+    }
+    let keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
+    store.createIndex(name, keyPath, options);
+  });
+}
+
+
+function onOpen(browserbase) {
+  const db = browserbase.db;
 
   db.onversionchange = event => {
     if (browserbase.dispatchCancelableEvent('versionchange')) {
@@ -757,16 +777,34 @@ function onOpen(browserbase) {
 
   window.addEventListener('storage', browserbase._onStorage);
 
-  let names = db.objectStoreNames;
-  for (let i = 0; i < names.length; i++) {
-    let name = names[i];
-    browserbase[name] = new ObjectStore(browserbase, name, keyPaths[name]);
-  }
+  // Store keyPath's for each store
+  addStores(browserbase, db, db.transaction(safariMultiStoreFix(db.objectStoreNames), 'readonly'));
 }
 
+
+function addStores(browserbase, db, transaction) {
+  const names = db.objectStoreNames;
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    browserbase[name] = new ObjectStore(browserbase, name, transaction.objectStore(name).keyPath);
+  }
+}
 
 function onClose(browserbase) {
   window.removeEventListener('storage', browserbase._onStorage);
   browserbase.db = null;
   browserbase.dispatchEvent('close');
+}
+
+function getStoreOptions(keyString) {
+  let keyPath = keyString.replace(/\s/g, '');
+  let storeOptions = {};
+  if (keyPath.slice(0, 2) === '++') {
+    keyPath = keyPath.replace('++', '');
+    storeOptions.autoIncrement = true;
+  } else if (keyPath[0] === '[') {
+    keyPath = keyPath.replace(/^\[|\]$/g, '').split(/\+/);
+  }
+  if (keyPath) storeOptions.keyPath = keyPath;
+  return storeOptions;
 }

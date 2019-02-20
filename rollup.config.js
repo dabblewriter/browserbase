@@ -4,9 +4,9 @@ export default {
   input: 'src/index.js',
   output: {
     format: 'cjs',
-    file: 'dist/index.js'
+    file: 'dist/index.js',
+    sourcemap: true,
   },
-  sourcemap: true,
   plugins: [
     buble({
       exclude: 'node_modules/**' // only transpile our source code
