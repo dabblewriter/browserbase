@@ -138,23 +138,33 @@ export default class Browserbase extends EventDispatcher {
   }
 
   /**
-   * Starts a multi-store transaction. All store methods after calling this will be part of this transaction until
-   * the next tick or until calling commitTransaction().
+   * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
+   * until the next tick or until calling db.commit().
    * @param  {Array} storeNames  Array of all the store names which will be used within this transaction
    * @param  {String} mode       The mode, defaults to readwrite unlike the indexedDB API
-   * @return {Promise}           A promise which is resolved once the transaction is complete
+   * @return {BrowserDB}         A temporary copy of BrowserDB to be used for this transaction only
    */
   start(storeNames, mode = 'readwrite') {
     if (!storeNames) storeNames = this.db.objectStoreNames;
+    if (this.current) throw new Error('Transaction already in progress');
+
+    const db = new Browserbase(this.name);
+    db.db = this.db;
+    Object.keys(this).forEach(key => {
+      const store = this[key];
+      if (!(store instanceof ObjectStore)) return;
+      db[key] = new ObjectStore(this, store.name, store.keyPath, db);
+    });
+
     try {
-      const trans = this.current = storeNames instanceof IDBTransaction
+      const trans = db.current = storeNames instanceof IDBTransaction
         ? storeNames
         : this.db.transaction(safariMultiStoreFix(storeNames), mode);
-      return this.current.promise = requestToPromise(this.current, null, this).then(result => {
-        if (this.current === trans) this.current = null;
+      trans.promise = requestToPromise(trans, null, this).then(result => {
+        if (db.current === trans) db.current = null;
         return result;
       }, err => {
-        if (this.current === trans) this.current = null;
+        if (db.current === trans) db.current = null;
         this.dispatchEvent('error', err);
         return Promise.reject(err);
       });
@@ -164,6 +174,8 @@ export default class Browserbase extends EventDispatcher {
       });
       throw err;
     }
+
+    return db;
   }
 
   /**
@@ -188,7 +200,7 @@ export default class Browserbase extends EventDispatcher {
    */
   dispatchChange(store, obj, key, from = 'local') {
     this.dispatchEvent('change', store.name, obj, key, from);
-    store.dispatchEvent('change', obj, key, from);
+    this[store.name].dispatchEvent('change', obj, key, from);
     if (from === 'local') {
       let itemKey = `browserbase/${this.name}/${store.name}`;
       // Stringify the key since it could be a string, number, or even an array
@@ -217,16 +229,17 @@ export default class Browserbase extends EventDispatcher {
  */
 class ObjectStore extends EventDispatcher {
 
-  constructor(db, name, keyPath) {
+  constructor(db, name, keyPath, transactionDb) {
     super();
     this.db = db;
     this.name = name;
     this.keyPath = keyPath;
+    this.transactionDb = transactionDb;
   }
 
-  _transStore(mode, index) {
+  _transStore(mode) {
     try {
-      let trans = this.db.current || this.db.db.transaction(this.name, mode);
+      let trans = this.transactionDb && this.transactionDb.current || this.db.db.transaction(this.name, mode);
       return trans.objectStore(this.name);
     } catch (err) {
       Promise.resolve().then(() => {

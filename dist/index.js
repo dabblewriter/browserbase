@@ -215,26 +215,36 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
   };
 
   /**
-   * Starts a multi-store transaction. All store methods after calling this will be part of this transaction until
-   * the next tick or until calling commitTransaction().
+   * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
+   * until the next tick or until calling db.commit().
    * @param  {Array} storeNames  Array of all the store names which will be used within this transaction
    * @param  {String} mode       The mode, defaults to readwrite unlike the indexedDB API
-   * @return {Promise}           A promise which is resolved once the transaction is complete
+   * @return {BrowserDB}         A temporary copy of BrowserDB to be used for this transaction only
    */
   Browserbase.prototype.start = function start (storeNames, mode) {
     var this$1 = this;
     if ( mode === void 0 ) mode = 'readwrite';
 
     if (!storeNames) { storeNames = this.db.objectStoreNames; }
+    if (this.current) { throw new Error('Transaction already in progress'); }
+
+    var db = new Browserbase(this.name);
+    db.db = this.db;
+    Object.keys(this).forEach(function (key) {
+      var store = this$1[key];
+      if (!(store instanceof ObjectStore)) { return; }
+      db[key] = new ObjectStore(this$1, store.name, store.keyPath, db);
+    });
+
     try {
-      var trans = this.current = storeNames instanceof IDBTransaction
+      var trans = db.current = storeNames instanceof IDBTransaction
         ? storeNames
         : this.db.transaction(safariMultiStoreFix(storeNames), mode);
-      return this.current.promise = requestToPromise(this.current, null, this).then(function (result) {
-        if (this$1.current === trans) { this$1.current = null; }
+      trans.promise = requestToPromise(trans, null, this).then(function (result) {
+        if (db.current === trans) { db.current = null; }
         return result;
       }, function (err) {
-        if (this$1.current === trans) { this$1.current = null; }
+        if (db.current === trans) { db.current = null; }
         this$1.dispatchEvent('error', err);
         return Promise.reject(err);
       });
@@ -244,6 +254,8 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
       });
       throw err;
     }
+
+    return db;
   };
 
   /**
@@ -270,7 +282,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     if ( from === void 0 ) from = 'local';
 
     this.dispatchEvent('change', store.name, obj, key, from);
-    store.dispatchEvent('change', obj, key, from);
+    this[store.name].dispatchEvent('change', obj, key, from);
     if (from === 'local') {
       var itemKey = "browserbase/" + (this.name) + "/" + (store.name);
       // Stringify the key since it could be a string, number, or even an array
@@ -299,22 +311,23 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
  * transaction first. Also helps with ranges and indexes and promises.
  */
 var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
-  function ObjectStore(db, name, keyPath) {
+  function ObjectStore(db, name, keyPath, transactionDb) {
     EventDispatcher.call(this);
     this.db = db;
     this.name = name;
     this.keyPath = keyPath;
+    this.transactionDb = transactionDb;
   }
 
   if ( EventDispatcher ) ObjectStore.__proto__ = EventDispatcher;
   ObjectStore.prototype = Object.create( EventDispatcher && EventDispatcher.prototype );
   ObjectStore.prototype.constructor = ObjectStore;
 
-  ObjectStore.prototype._transStore = function _transStore (mode, index) {
+  ObjectStore.prototype._transStore = function _transStore (mode) {
     var this$1 = this;
 
     try {
-      var trans = this.db.current || this.db.db.transaction(this.name, mode);
+      var trans = this.transactionDb && this.transactionDb.current || this.db.db.transaction(this.name, mode);
       return trans.objectStore(this.name);
     } catch (err) {
       Promise.resolve().then(function () {
