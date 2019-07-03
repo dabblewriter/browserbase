@@ -60,7 +60,7 @@ declare class Browserbase extends EventDispatcher {
    */
   static deleteDatabase(name: string): Promise<void>;
 
-  [storeName: string]: ObjectStore;
+  [storeName: string]: ObjectStore | any;
 
   /**
    * Creates a new indexeddb database with the given name.
@@ -91,7 +91,7 @@ declare class Browserbase extends EventDispatcher {
    * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
    * until the next tick or until calling db.commit().
    */
-  start(storeNames: string[], mode: IDBTransactionMode = 'readwrite'): Browserbase;
+  start(storeNames: string[], mode?: IDBTransactionMode): Browserbase;
 
   /**
    * Finishes a started transaction so that other transactions may be run. This is not needed for a transaction to run,
@@ -103,7 +103,7 @@ declare class Browserbase extends EventDispatcher {
   /**
    * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
    */
-  dispatchChange(store: ObjectStore, obj: any, key: any, from: 'local' | 'remote' = 'local'): void;
+  dispatchChange(store: ObjectStore, obj: any, key: any, from?: 'local' | 'remote'): void;
 
   /**
    * Creates or updates a store with the given indexesString. If null will delete the store.
@@ -116,7 +116,7 @@ declare class Browserbase extends EventDispatcher {
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-class ObjectStore extends EventDispatcher {
+declare class ObjectStore extends EventDispatcher {
   constructor(db: Browserbase, name: string, keyPath: string, transactionDb: Browserbase);
 
   /**
@@ -128,16 +128,12 @@ class ObjectStore extends EventDispatcher {
   /**
    * Get all objects in this object store. To get only a range, use where()
    */
-  getAll(): Promise<any[]> {
-    return requestToPromise(this._transStore('readonly').getAll(), null, this.db);
-  }
+  getAll(): Promise<any[]>;
 
   /**
    * Gets the count of all objects in this store
    */
-  count(): Promise<number> {
-    return requestToPromise(this._transStore('readonly').count(), null, this.db);
-  }
+  count(): Promise<number>;
 
   /**
    * Adds an object to the store. If an object with the given key already exists, it will not overwrite it.
@@ -185,7 +181,7 @@ class ObjectStore extends EventDispatcher {
    * Use to get a subset of items from the store by id or index. Returns a Where object to allow setting the range and
    * limit.
    */
-  where(index: any = ''): Where;
+  where(index?: any): Where;
 }
 
 
@@ -193,7 +189,7 @@ class ObjectStore extends EventDispatcher {
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-class Where {
+declare class Where {
   constructor(store: ObjectStore, index: any);
 
   /**
@@ -275,7 +271,7 @@ class Where {
   /**
    * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
    */
-  cursor(iterator: CursorIterator, mode: IDBTransactionMode = 'readonly', keyCursor = false): Promise<void>;
+  cursor(iterator: CursorIterator, mode?: IDBTransactionMode, keyCursor?: boolean): Promise<void>;
 
   /**
    * Updates objects using a cursor to update many objects at once matching the range.
@@ -285,13 +281,13 @@ class Where {
   /**
    * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
    */
-  forEach(iterator: CursorIterator, mode: IDBTransactionMode = 'readonly'): Promise<void>;
+  forEach(iterator: CursorIterator, mode?: IDBTransactionMode): Promise<void>;
 
   /**
    * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one and
    * returning the results of the iterator in an array.
    */
-  map(iterator: CursorIterator, mode = 'readonly'): Promise<any[]>;
+  map(iterator: CursorIterator, mode?: IDBTransactionMode): Promise<any[]>;
 }
 
 export default Browserbase;
