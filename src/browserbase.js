@@ -363,8 +363,7 @@ class ObjectStore extends EventDispatcher {
   }
 
   /**
-   * Deletes an object from the store.
-   * @param {mixed} key The key of the object to delete.
+   * Deletes all objects from a store.
    * @return {Promise}
    */
   deleteAll() {
@@ -641,7 +640,8 @@ class Where {
   }
 
   /**
-   * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
+   * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one and
+   * returning the results of the iterator in an array.
    * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
    * @return {Promise}           Resolves with an array which is the return result of each iteration
    */
