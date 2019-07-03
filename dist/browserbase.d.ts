@@ -1,4 +1,4 @@
-import EventDispatcher from './event-dispatcher.d.ts';
+import EventDispatcher from './event-dispatcher';
 
 interface StoresDefinitions {
   [storeName: string]: string;

@@ -1,4 +1,4 @@
-import EventDispatcher from './event-dispatcher.d.ts';
-import Browserbase from './browserbase.d.ts';
+import EventDispatcher from './event-dispatcher';
+import Browserbase from './browserbase';
 
 export { EventDispatcher, Browserbase };
