@@ -1,6 +1,7 @@
 import EventDispatcher from './event-dispatcher';
 const maxString = String.fromCharCode(65535);
 const localStorage = window.localStorage;
+const noop = data => data;
 
 
 /**
@@ -63,11 +64,13 @@ export default class Browserbase extends EventDispatcher {
   /**
    * Creates a new indexeddb database with the given name.
    */
-  constructor(name) {
+  constructor(name, parentDb) {
     super();
     this.name = name;
     this.db = null;
-    this.current = null;
+    this.parentDb = parentDb;
+    this._dispatchRemote = false;
+    this._current = null;
     this._versionMap = {};
     this._versionHandlers = {};
     this._onStorage = null;
@@ -153,25 +156,25 @@ export default class Browserbase extends EventDispatcher {
    */
   start(storeNames, mode = 'readwrite') {
     if (!storeNames) storeNames = this.db.objectStoreNames;
-    if (this.current) throw new Error('Transaction already in progress');
+    if (this._current) throw new Error('Cannot start a new transaction on an existing transaction browserbase');
 
-    const db = new Browserbase(this.name);
+    const db = new this.constructor(this.name, this);
     db.db = this.db;
     Object.keys(this).forEach(key => {
       const store = this[key];
       if (!(store instanceof ObjectStore)) return;
-      db[key] = new ObjectStore(this, store.name, store.keyPath, db);
+      db[key] = new ObjectStore(db, store.name, store.keyPath);
     });
 
     try {
-      const trans = db.current = storeNames instanceof IDBTransaction
+      const trans = db._current = storeNames instanceof IDBTransaction
         ? storeNames
         : this.db.transaction(safariMultiStoreFix(storeNames), mode);
-      trans.promise = requestToPromise(trans, null, this).then(result => {
-        if (db.current === trans) db.current = null;
+      trans.promise = requestToPromise(trans, null, db).then(result => {
+        if (db._current === trans) db._current = null;
         return result;
       }, err => {
-        if (db.current === trans) db.current = null;
+        if (db._current === trans) db._current = null;
         this.dispatchEvent('error', err);
         return Promise.reject(err);
       });
@@ -191,10 +194,14 @@ export default class Browserbase extends EventDispatcher {
    * code elsewhere.
    * @return {Promise} The same promise returned by start() which will resolve once the transaction is done.
    */
-  commit() {
-    if (!this.current) throw new Error('There is no current transaction to commit.');
-    let promise = this.current.promise;
-    this.current = null;
+  commit(options) {
+    if (!this._current) throw new Error('There is no current transaction to commit.');
+    const promise = this._current.promise;
+    if (options && options.remoteChange) {
+      this._dispatchRemote = true;
+      promise.then(() => this._dispatchRemote = false);
+    }
+    this._current = null;
     return promise;
   }
 
@@ -205,14 +212,28 @@ export default class Browserbase extends EventDispatcher {
    * @param {mixed}       key    The key of the object being changed or deleted
    * @param {String}      from   The source of this event, whether it was from the 'local' window or a 'remote' window
    */
-  dispatchChange(store, obj, key, from = 'local') {
-    this.dispatchEvent('change', store.name, obj, key, from);
-    this[store.name].dispatchEvent('change', obj, key, from);
-    if (from === 'local') {
+  dispatchChange(store, obj, key, from = 'local', dispatchRemote = false) {
+    const declaredFrom = this._dispatchRemote || dispatchRemote ? 'remote' : from;
+    this[store.name].dispatchEvent('change', obj, key, declaredFrom);
+    this.dispatchEvent('change', store.name, obj, key, declaredFrom);
+
+    if (this.parentDb) {
+      this.parentDb.dispatchChange(store, obj, key, from, this._dispatchRemote);
+    } else if (from === 'local') {
       let itemKey = `browserbase/${this.name}/${store.name}`;
       // Stringify the key since it could be a string, number, or even an array
       localStorage.setItem(itemKey, JSON.stringify(key));
       localStorage.removeItem(itemKey);
+    }
+  }
+
+  /**
+   * Dispatch an error event.
+   */
+  dispatchError(err) {
+    this.dispatchEvent('error', err);
+    if (this.parentDb) {
+      this.dispatchEvent('error', err);
     }
   }
 
@@ -223,8 +244,8 @@ export default class Browserbase extends EventDispatcher {
    * @return {Promise}           Resolves with an array which is the return result of each iteration
    */
   upgradeStore(storeName, indexesString) {
-    if (!this.current) this.start();
-    upgradeStore(this.db, this.current, storeName, indexesString);
+    if (!this._current) return this.start().upgradeStore(storeName, indexesString);
+    upgradeStore(this.db, this._current, storeName, indexesString);
   }
 
 }
@@ -236,17 +257,18 @@ export default class Browserbase extends EventDispatcher {
  */
 class ObjectStore extends EventDispatcher {
 
-  constructor(db, name, keyPath, transactionDb) {
+  constructor(db, name, keyPath) {
     super();
     this.db = db;
     this.name = name;
     this.keyPath = keyPath;
-    this.transactionDb = transactionDb;
+    this.store = noop;
+    this.revive = noop;
   }
 
   _transStore(mode) {
     try {
-      let trans = this.transactionDb && this.transactionDb.current || this.db.db.transaction(this.name, mode);
+      let trans = this.db._current || this.db.db.transaction(this.name, mode);
       return trans.objectStore(this.name);
     } catch (err) {
       Promise.resolve().then(() => {
@@ -257,12 +279,26 @@ class ObjectStore extends EventDispatcher {
   }
 
   /**
+   * Dispatches a change event.
+   */
+  dispatchChange(obj, key) {
+    this.db.dispatchChange(this, obj, key);
+  }
+
+  /**
+   * Dispatch an error event.
+   */
+  dispatchError(err) {
+    this.db.dispatchError(err);
+  }
+
+  /**
    * Get an object from the store by its primary key
    * @param  {mixed} id The key of the object being retreived
    * @return {Promise}  Resolves with the object being retreived
    */
   get(key) {
-    return requestToPromise(this._transStore('readonly').get(key), null, this.db);
+    return requestToPromise(this._transStore('readonly').get(key), null, this).then(this.revive);
   }
 
   /**
@@ -270,7 +306,8 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise} Resolves with an array of objects
    */
   getAll() {
-    return requestToPromise(this._transStore('readonly').getAll(), null, this.db);
+    return requestToPromise(this._transStore('readonly').getAll(), null, this)
+      .then(results => results.map(this.revive));
   }
 
   /**
@@ -278,7 +315,7 @@ class ObjectStore extends EventDispatcher {
    * @return {Promise} Resolves with a number
    */
   count() {
-    return requestToPromise(this._transStore('readonly').count(), null, this.db);
+    return requestToPromise(this._transStore('readonly').count(), null, this);
   }
 
   /**
@@ -289,8 +326,8 @@ class ObjectStore extends EventDispatcher {
    */
   add(obj, key) {
     let store = this._transStore('readwrite');
-    return requestToPromise(store.add(obj, key), store.transaction, this.db).then(key => {
-      this.db.dispatchChange(this, obj, key);
+    return requestToPromise(store.add(this.store(obj), key), store.transaction, this).then(key => {
+      this.dispatchChange(obj, key);
       return key;
     });
   }
@@ -303,8 +340,8 @@ class ObjectStore extends EventDispatcher {
   addAll(array) {
     let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
-      return requestToPromise(store.add(obj), store.transaction, this.db).then(key => {
-        this.db.dispatchChange(this, obj, key);
+      return requestToPromise(store.add(this.store(obj)), store.transaction, this).then(key => {
+        this.dispatchChange(obj, key);
       });
     }));
   }
@@ -327,8 +364,8 @@ class ObjectStore extends EventDispatcher {
    */
   put(obj, key) {
     let store = this._transStore('readwrite');
-    return requestToPromise(store.put(obj, key), store.transaction, this.db).then(key => {
-      this.db.dispatchChange(this, obj, key);
+    return requestToPromise(store.put(this.store(obj), key), store.transaction, this).then(key => {
+      this.dispatchChange(obj, key);
       return key;
     });
   }
@@ -341,8 +378,8 @@ class ObjectStore extends EventDispatcher {
   putAll(array) {
     let store = this._transStore('readwrite');
     return Promise.all(array.map(obj => {
-      return requestToPromise(store.put(obj), store.transaction, this.db).then(key => {
-        this.db.dispatchChange(this, obj, key);
+      return requestToPromise(store.put(this.store(obj)), store.transaction, this).then(key => {
+        this.dispatchChange(obj, key);
       });
     }));
   }
@@ -364,8 +401,8 @@ class ObjectStore extends EventDispatcher {
    */
   delete(key) {
     let store = this._transStore('readwrite');
-    return requestToPromise(store.delete(key), store.transaction, this.db).then(() => {
-      this.db.dispatchChange(this, null, key);
+    return requestToPromise(store.delete(key), store.transaction, this).then(() => {
+      this.dispatchChange(null, key);
     });
   }
 
@@ -405,6 +442,20 @@ class Where {
     this._value = undefined;
     this._limit = undefined;
     this._direction = 'next';
+  }
+
+  /**
+   * Dispatches a change event.
+   */
+  dispatchChange(obj, key) {
+    this.store.dispatchChange(obj, key);
+  }
+
+  /**
+   * Dispatch an error event.
+   */
+  dispatchError(err) {
+    this.store.dispatchError(err);
   }
 
   /**
@@ -511,16 +562,17 @@ class Where {
    */
   getAll() {
     let range = this.toRange();
-    // Handle reverse with getAll and get
+    // Handle reverse with cursor
     if (this._direction === 'prev') {
       let results = [];
       if (this._limit <= 0) return Promise.resolve(results);
-      return this.forEach(obj => results.push(obj)).then(() => results);
+      return this.forEach(obj => results.push(this.store.revive(obj))).then(() => results);
     }
 
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
-    return requestToPromise(source.getAll(range, this._limit), null, this.store.db);
+    return requestToPromise(source.getAll(range, this._limit), null, this)
+      .then(results => results.map(this.store.revive));
   }
 
   /**
@@ -529,7 +581,7 @@ class Where {
    */
   getAllKeys() {
     let range = this.toRange();
-    // Handle reverse with getAll and get
+    // Handle reverse with cursor
     if (this._direction === 'prev') {
       let results = [];
       if (this._limit <= 0) return Promise.resolve(results);
@@ -538,7 +590,7 @@ class Where {
 
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
-    return requestToPromise(source.getAllKeys(range, this._limit), null, this.store.db);
+    return requestToPromise(source.getAllKeys(range, this._limit), null, this);
   }
 
   /**
@@ -546,7 +598,7 @@ class Where {
    * @return {Promise} Resolves with an object or undefined if none was found
    */
   get() {
-    return this.limit(1).getAll().then(result => result[0]);
+    return this.limit(1).getAll().then(result => this.store.revive(result[0]));
   }
 
   /**
@@ -566,7 +618,7 @@ class Where {
     let range = this.toRange();
     let store = this.store._transStore('readonly');
     let source = this.index ? store.index(this.index) : store;
-    return requestToPromise(source.count(range), null, this.store.db);
+    return requestToPromise(source.count(range), null, this);
   }
 
   /**
@@ -577,8 +629,8 @@ class Where {
     // Uses a cursor to delete so that each item can get a change event dispatched for it
     return this.map((object, cursor, trans) => {
       let key = cursor.primaryKey;
-      return requestToPromise(cursor.delete(), trans, this.store.db).then(() => {
-        this.store.db.dispatchChange(this.store, null, key);
+      return requestToPromise(cursor.delete(), trans, this).then(() => {
+        this.dispatchChange(null, key);
       });
     }, 'readwrite').then(promises => Promise.all(promises)).then(() => {});
   }
@@ -607,7 +659,7 @@ class Where {
           resolve();
         }
       };
-      request.onerror = errorHandler(reject, this.store.db);
+      request.onerror = errorHandler(reject, this);
     });
   }
 
@@ -618,16 +670,17 @@ class Where {
    * @return {Promise}           Resolves without result when finished
    */
   update(iterator) {
+    const { store, revive } = this.store;
     return this.map((object, cursor, trans) => {
       let key = cursor.primaryKey;
       let newValue = iterator(object, cursor);
       if (newValue === null) {
-        return requestToPromise(cursor.delete(), trans, this.store.db).then(() => {
-          this.store.db.dispatchChange(this.store, null, key);
+        return requestToPromise(cursor.delete(), trans, this).then(() => {
+          this.dispatchChange(null, key);
         });
       } else if (newValue !== undefined) {
-        return requestToPromise(cursor.update(newValue), trans, this.store.db).then(() => {
-          this.store.db.dispatchChange(this.store, newValue, key);
+        return requestToPromise(cursor.update(this.store.store(newValue)), trans, this).then(() => {
+          this.dispatchChange(newValue, key);
         });
       } else {
         return undefined;
@@ -642,7 +695,7 @@ class Where {
    */
   forEach(iterator, mode = 'readonly') {
     return this.cursor((cursor, trans) => {
-      iterator(cursor.value, cursor, trans);
+      iterator(this.store.revive(cursor.value), cursor, trans);
     }, mode);
   }
 
@@ -662,10 +715,10 @@ class Where {
 
 
 
-function requestToPromise(request, transaction, db) {
+function requestToPromise(request, transaction, errorDispatcher) {
   return new Promise((resolve, reject) => {
     if (transaction) {
-      if (!transaction.promise) transaction.promise = requestToPromise(transaction, null, db);
+      if (!transaction.promise) transaction.promise = requestToPromise(transaction, null, errorDispatcher);
       transaction.promise = transaction.promise.then(() => resolve(request.result), err => {
         reject(request.error || err);
         return Promise.reject(err);
@@ -674,7 +727,7 @@ function requestToPromise(request, transaction, db) {
       request.onsuccess = successHandler(resolve);
     }
     if (request.oncomplete === null) request.oncomplete = successHandler(resolve);
-    if (request.onerror === null) request.onerror = errorHandler(reject, db);
+    if (request.onerror === null) request.onerror = errorHandler(reject, errorDispatcher);
     if (request.onabort === null) request.onabort = () => reject(new Error('Abort'));
   });
 }
@@ -683,10 +736,10 @@ function successHandler(resolve) {
   return event => resolve(event.target.result);
 }
 
-function errorHandler(reject, db) {
+function errorHandler(reject, errorDispatcher) {
   return event => {
     reject(event.target.error);
-    db.dispatchEvent('error', event.target.error);
+    errorDispatcher && errorDispatcher.dispatchError(event.target.error);
   };
 }
 

@@ -1,11 +1,15 @@
 import EventDispatcher from './event-dispatcher';
 
-interface StoresDefinitions {
+export interface StoresDefinitions {
   [storeName: string]: string;
 }
 
-type IDBTransactionMode = 'readonly' | 'readwrite' | 'versionchange';
-type CursorIterator = (cursor: IDBCursor, transaction: IDBTransaction) => false | any;
+export type IDBTransactionMode = 'readonly' | 'readwrite' | 'versionchange';
+export type CursorIterator = (cursor: IDBCursor, transaction: IDBTransaction) => false | any;
+
+interface ErrorDispatcher {
+  dispatchError: (err: Error) => void;
+}
 
 /**
  * A nice promise-based syntax on indexedDB also providing events when open, closed, and whenever data is changed.
@@ -54,23 +58,26 @@ type CursorIterator = (cursor: IDBCursor, transaction: IDBTransaction) => false 
  *   console.warn('There was an error opening the database:', err);
  * });
  */
-declare class Browserbase extends EventDispatcher {
+export declare class Browserbase extends EventDispatcher implements ErrorDispatcher {
   /**
    * Deletes a database by name.
    */
   static deleteDatabase(name: string): Promise<void>;
 
-  [storeName: string]: ObjectStore | any;
+  [storeName: string]: ObjectStore<any, any> | any;
+
+  name: string;
+  db: IDBDatabase;
 
   /**
    * Creates a new indexeddb database with the given name.
    */
-  constructor(name: string);
+  constructor(name: string, protected parentDb?: this);
 
   /**
    * Defines a version for the database. Additional versions may be added, but existing version should not be changed.
    */
-  version(version: number, stores: StoresDefinitions, upgradeFunction: Function): this;
+  version(version: number, stores: StoresDefinitions, upgradeFunction?: (oldVersion?: number, transaction?: IDBTransaction) => void): this;
 
   /**
    * Whether this database is open or closed.
@@ -96,19 +103,19 @@ declare class Browserbase extends EventDispatcher {
    * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
    * until the next tick or until calling db.commit().
    */
-  start(storeNames: string[], mode?: IDBTransactionMode): Browserbase;
+  start(storeNames: string[] | IDBTransaction, mode?: IDBTransactionMode): this;
 
   /**
    * Finishes a started transaction so that other transactions may be run. This is not needed for a transaction to run,
    * but it allows other transactions to be run in this thread. It ought to be called to avoid conflicts with other
    * code elsewhere.
    */
-  commit(): Promise<void>;
+  commit(options?: { remoteChange?: boolean }): Promise<void>;
 
   /**
    * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
    */
-  dispatchChange(store: ObjectStore, obj: any, key: any, from?: 'local' | 'remote'): void;
+  dispatchChange(store: ObjectStore<any, any>, obj: any, key: any, from?: 'local' | 'remote'): void;
 
   /**
    * Creates or updates a store with the given indexesString. If null will delete the store.
@@ -121,19 +128,38 @@ declare class Browserbase extends EventDispatcher {
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-declare class ObjectStore extends EventDispatcher {
+export declare class ObjectStore<Type = any, Key = string> extends EventDispatcher implements ErrorDispatcher {
+  db: Browserbase;
+  name: string;
+  keyPath: string;
+
+  /**
+   * Set this function to alter objects to be stored in this database store.
+   */
+  store: (obj: Type) => Type;
+
+  /**
+   * Set this function to alter objects when they are retrieved from this database store.
+   */
+  revive: (obj: Type) => Type;
+
   constructor(db: Browserbase, name: string, keyPath: string, transactionDb: Browserbase);
+
+  /**
+   * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
+   */
+  dispatchChange(obj: any, key: any): void;
 
   /**
    * Get an object from the store by its primary key
    */
-  get(key: any): Promise<any>;
+  get(key: Key): Promise<Type>;
 
 
   /**
    * Get all objects in this object store. To get only a range, use where()
    */
-  getAll(): Promise<any[]>;
+  getAll(): Promise<Type[]>;
 
   /**
    * Gets the count of all objects in this store
@@ -143,39 +169,39 @@ declare class ObjectStore extends EventDispatcher {
   /**
    * Adds an object to the store. If an object with the given key already exists, it will not overwrite it.
    */
-  add(obj: any, key?: any): Promise<any>;
+  add(obj: Type, key?: Key): Promise<Key>;
 
   /**
    * Adds an array of objects to the store in once transaction. You can also call startTransaction and use add().
    */
-  addAll(array: any[]): Promise<void>;
+  addAll(array: Type[]): Promise<void>;
 
   /**
    * Adds an array of objects to the store in once transaction. You can also call startTransaction and use add(). Alias
    * of addAll().
    */
-  bulkAdd(array: any[]): Promise<void>;
+  bulkAdd(array: Type[]): Promise<void>;
 
   /**
    * Saves an object to the store. If an object with the given key already exists, it will overwrite it.
    */
-  put(obj: any, key?: any): Promise<any>;
+  put(obj: Type, key?: Key): Promise<Key>;
 
   /**
    * Saves an array of objects to the store in once transaction. You can also call startTransaction and use put().
    */
-  putAll(array: any[]): Promise<void>;
+  putAll(array: Type[]): Promise<void>;
 
   /**
    * Saves an array of objects to the store in once transaction. You can also call startTransaction and use put(). Alias
    * of putAll().
    */
-  bulkPut(array: any[]): Promise<void>;
+  bulkPut(array: Type[]): Promise<void>;
 
   /**
    * Deletes all objects from a store.
    */
-  delete(key: any): Promise<void>;
+  delete(key: Key): Promise<void>;
 
   /**
    * Deletes an object from the store.
@@ -186,7 +212,7 @@ declare class ObjectStore extends EventDispatcher {
    * Use to get a subset of items from the store by id or index. Returns a Where object to allow setting the range and
    * limit.
    */
-  where(index?: any): Where;
+  where(index?: string): Where<Type, Key>;
 }
 
 
@@ -194,8 +220,16 @@ declare class ObjectStore extends EventDispatcher {
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-declare class Where {
-  constructor(store: ObjectStore, index: any);
+export declare class Where<Type, Key> implements ErrorDispatcher {
+  store: ObjectStore<Type, Key>;
+  index: any;
+
+  constructor(store: ObjectStore<Type, Key>, index: string);
+
+  /**
+   * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
+   */
+  dispatchChange(obj: any, key: any): void;
 
   /**
    * Set greater than the value provided.
@@ -225,7 +259,7 @@ declare class Where {
   /**
    * Sets the upper and lower bounds to match any string starting with this prefix.
    */
-  startsWith(prefix: string): this;
+  startsWith(prefix: any): this;
 
   /**
    * Limit the return results to the given count.
@@ -245,22 +279,22 @@ declare class Where {
   /**
    * Get all the objects matching the range limited by the limit.
    */
-  getAll(): Promise<any[]>;
+  getAll(): Promise<Type[]>;
 
   /**
    * Get all the keys matching the range limited by the limit.
    */
-  getAllKeys(): Promise<any[]>;
+  getAllKeys(): Promise<any>;
 
   /**
    * Gets a single object, the first one matching the criteria
    */
-  get(): Promise<any>;
+  get(): Promise<Type>;
 
   /**
    * Gets a single key, the first one matching the criteria
    */
-  getKey(): Promise<any[]>;
+  getKey(): Promise<any>;
 
   /**
    * Gets the count of the objects matching the criteria
@@ -294,5 +328,3 @@ declare class Where {
    */
   map(iterator: CursorIterator, mode?: IDBTransactionMode): Promise<any[]>;
 }
-
-export default Browserbase;
