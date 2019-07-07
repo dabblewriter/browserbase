@@ -88,6 +88,11 @@ declare class Browserbase extends EventDispatcher {
   close(): void;
 
   /**
+   * Deletes this database.
+   */
+  deleteDatabase(): Promise<void>;
+
+  /**
    * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
    * until the next tick or until calling db.commit().
    */

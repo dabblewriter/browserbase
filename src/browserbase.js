@@ -129,12 +129,19 @@ export default class Browserbase extends EventDispatcher {
   }
 
   /**
-   * Closes the databse.
+   * Closes the database.
    */
   close() {
     if (!this.db) return;
     this.db.close();
     onClose(this);
+  }
+
+  /**
+   * Deletes this database.
+   */
+  deleteDatabase() {
+    return Browserbase.deleteDatabase(this.name);
   }
 
   /**
