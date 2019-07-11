@@ -92,6 +92,15 @@ export default class Browserbase extends EventDispatcher {
   }
 
   /**
+   * Returns a list of the defined versions.
+   */
+  getVersions() {
+    return Object.keys(this._versionMap).map(key => {
+      return { version: parseInt(key), stores: this._versionMap[key], upgradeFunction: this._versionHandlers[key] };
+    });
+  }
+
+  /**
    * Whether this database is open or closed.
    * @return {Boolean}
    */

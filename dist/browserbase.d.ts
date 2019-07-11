@@ -4,6 +4,13 @@ export interface StoresDefinitions {
   [storeName: string]: string;
 }
 
+export interface VersionDefinition {
+  version: number;
+  stores: StoresDefinitions;
+  upgradeFunction?: UpgradeFunction;
+}
+
+export type UpgradeFunction = (oldVersion?: number, transaction?: IDBTransaction) => void;
 export type IDBTransactionMode = 'readonly' | 'readwrite' | 'versionchange';
 export type CursorIterator = (cursor: IDBCursor, transaction: IDBTransaction) => false | any;
 
@@ -72,12 +79,17 @@ export declare class Browserbase extends EventDispatcher implements ErrorDispatc
   /**
    * Creates a new indexeddb database with the given name.
    */
-  constructor(name: string, protected parentDb?: this);
+  constructor(name: string);
 
   /**
    * Defines a version for the database. Additional versions may be added, but existing version should not be changed.
    */
-  version(version: number, stores: StoresDefinitions, upgradeFunction?: (oldVersion?: number, transaction?: IDBTransaction) => void): this;
+  version(version: number, stores: StoresDefinitions, upgradeFunction?: UpgradeFunction): this;
+
+  /**
+   * Returns a list of the defined versions.
+   */
+  getVersions(): VersionDefinition[];
 
   /**
    * Whether this database is open or closed.
@@ -118,6 +130,11 @@ export declare class Browserbase extends EventDispatcher implements ErrorDispatc
   dispatchChange(store: ObjectStore<any, any>, obj: any, key: any, from?: 'local' | 'remote'): void;
 
   /**
+   * Dispatch an error event.
+   */
+  dispatchError: (err: Error) => void;
+
+  /**
    * Creates or updates a store with the given indexesString. If null will delete the store.
    */
   upgradeStore(storeName: string, indexesString: string): Promise<void>;
@@ -149,6 +166,11 @@ export declare class ObjectStore<Type = any, Key = string> extends EventDispatch
    * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
    */
   dispatchChange(obj: any, key: any): void;
+
+  /**
+   * Dispatch an error event.
+   */
+  dispatchError: (err: Error) => void;
 
   /**
    * Get an object from the store by its primary key
@@ -230,6 +252,11 @@ export declare class Where<Type, Key> implements ErrorDispatcher {
    * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
    */
   dispatchChange(obj: any, key: any): void;
+
+  /**
+   * Dispatch an error event.
+   */
+  dispatchError: (err: Error) => void;
 
   /**
    * Set greater than the value provided.

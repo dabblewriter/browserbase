@@ -168,6 +168,17 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
   };
 
   /**
+   * Returns a list of the defined versions.
+   */
+  Browserbase.prototype.getVersions = function getVersions () {
+    var this$1 = this;
+
+    return Object.keys(this._versionMap).map(function (key) {
+      return { version: parseInt(key), stores: this$1._versionMap[key], upgradeFunction: this$1._versionHandlers[key] };
+    });
+  };
+
+  /**
    * Whether this database is open or closed.
    * @return {Boolean}
    */
@@ -182,12 +193,18 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
   Browserbase.prototype.open = function open () {
     var this$1 = this;
 
+    if (this._opening) {
+      return this._opening;
+    }
+
     if (!Object.keys(this._versionMap).length) {
       return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
+
     var version = Object.keys(this._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; }).pop();
     var upgradedFrom = null;
-    return new Promise(function (resolve, reject) {
+
+    return this._opening = new Promise(function (resolve, reject) {
       var request = window.indexedDB.open(this$1.name, version);
       request.onsuccess = successHandler(resolve);
       request.onerror = errorHandler(reject, this$1);
@@ -214,6 +231,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
   Browserbase.prototype.close = function close () {
     if (!this.db) { return; }
     this.db.close();
+    this._opening = undefined;
     onClose(this);
   };
 
