@@ -104,12 +104,18 @@ export default class Browserbase extends EventDispatcher {
    * @return {Promise}
    */
   open() {
+    if (this._opening) {
+      return this._opening;
+    }
+
     if (!Object.keys(this._versionMap).length) {
       return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
+
     let version = Object.keys(this._versionMap).map(key => parseInt(key)).sort((a, b) => a - b).pop();
-    let upgradedFrom = null, created = false;
-    return new Promise((resolve, reject) => {
+    let upgradedFrom = null;
+
+    return this._opening = new Promise((resolve, reject) => {
       let request = window.indexedDB.open(this.name, version);
       request.onsuccess = successHandler(resolve);
       request.onerror = errorHandler(reject, this);
@@ -119,7 +125,6 @@ export default class Browserbase extends EventDispatcher {
         this.db.onabort = errorHandler(() => reject(new Error('Abort')), this);
         let oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
-        created = oldVersion === 0;
         upgrade(oldVersion, request.transaction, this.db, this._versionMap, this._versionHandlers, this);
       };
     }).then(db => {
@@ -137,6 +142,7 @@ export default class Browserbase extends EventDispatcher {
   close() {
     if (!this.db) return;
     this.db.close();
+    this._opening = undefined;
     onClose(this);
   }
 
