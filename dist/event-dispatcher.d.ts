@@ -13,7 +13,7 @@ declare class EventDispatcher {
   /**
    * Removes a previously added event listener
    */
-  on(type: string, listener: Function): this;
+  off(type: string, listener: Function): this;
 
   /**
    * Dispatches an event calling all listeners with the given args.
