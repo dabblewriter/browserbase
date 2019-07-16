@@ -115,7 +115,7 @@ export declare class Browserbase extends EventDispatcher implements ErrorDispatc
    * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
    * until the next tick or until calling db.commit().
    */
-  start(storeNames: string[] | IDBTransaction, mode?: IDBTransactionMode): this;
+  start(storeNames?: string[] | IDBTransaction, mode?: IDBTransactionMode): this;
 
   /**
    * Finishes a started transaction so that other transactions may be run. This is not needed for a transaction to run,

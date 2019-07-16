@@ -42,6 +42,13 @@ EventDispatcher.prototype.off = function off (type, listener) {
 };
 
 /**
+ * Checks if there are any event listeners for this event
+ */
+EventDispatcher.prototype.hasListeners = function hasListeners (type) {
+  return getEventListeners(this, type).length > 0;
+};
+
+/**
  * Dispatches an event calling all listeners with the given args (minus type).
  */
 EventDispatcher.prototype.dispatchEvent = function dispatchEvent (type /*[, args]*/) {
@@ -979,11 +986,13 @@ function onOpen(browserbase) {
       var key = JSON.parse(event.newValue);
       var store = browserbase[storeName];
       if (store) {
-        store.get(key).then(function (object) {
-          if ( object === void 0 ) object = null;
+        if (browserbase.hasListeners('change') || store.hasListeners('change')) {
+          store.get(key).then(function (object) {
+            if ( object === void 0 ) object = null;
 
-          browserbase.dispatchChange(store, object, key, 'remote');
-        });
+            browserbase.dispatchChange(store, object, key, 'remote');
+          });
+        }
       } else {
         console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
       }

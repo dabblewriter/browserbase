@@ -40,6 +40,13 @@ export default class EventDispatcher {
   }
 
   /**
+   * Checks if there are any event listeners for this event
+   */
+  hasListeners(type) {
+    return getEventListeners(this, type).length > 0;
+  }
+
+  /**
    * Dispatches an event calling all listeners with the given args (minus type).
    */
   dispatchEvent(type /*[, args]*/) {

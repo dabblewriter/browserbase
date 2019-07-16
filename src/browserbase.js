@@ -852,9 +852,11 @@ function onOpen(browserbase) {
       const key = JSON.parse(event.newValue);
       const store = browserbase[storeName];
       if (store) {
-        store.get(key).then((object = null) => {
-          browserbase.dispatchChange(store, object, key, 'remote');
-        });
+        if (browserbase.hasListeners('change') || store.hasListeners('change')) {
+          store.get(key).then((object = null) => {
+            browserbase.dispatchChange(store, object, key, 'remote');
+          });
+        }
       } else {
         console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
       }

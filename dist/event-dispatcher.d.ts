@@ -16,6 +16,11 @@ declare class EventDispatcher {
   off(type: string, listener: Function): this;
 
   /**
+   * Checks if there are any event listeners for this event
+   */
+  hasListeners(type: string): boolean;
+
+  /**
    * Dispatches an event calling all listeners with the given args.
    */
   dispatchEvent(type: string, ...args: any[]): this;
