@@ -68,7 +68,7 @@ object. For indexes, use a "-" index to delete a previously defined index, use "
 
 Example:
 
-```
+```js
 // Initial version, should remain the same with later updates
 db.version(1, {
  friends: 'fullName, age'
@@ -97,7 +97,7 @@ database. This is how you will work with the data in the database.
 
 Example:
 
-```
+```js
 // Create the object store "foo"
 db.version(1, { foo: 'id' });
 
