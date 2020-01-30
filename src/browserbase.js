@@ -159,6 +159,7 @@ export default class Browserbase extends EventDispatcher {
    * Deletes this database.
    */
   deleteDatabase() {
+    this.close();
     return Browserbase.deleteDatabase(this.name);
   }
 
@@ -735,7 +736,9 @@ function requestToPromise(request, transaction, errorDispatcher) {
     if (transaction) {
       if (!transaction.promise) transaction.promise = requestToPromise(transaction, null, errorDispatcher);
       transaction.promise = transaction.promise.then(() => resolve(request.result), err => {
-        reject(request.error || err);
+        let requestError;
+        try { requestError = request.error } catch(e) {}
+        reject(requestError || err);
         return Promise.reject(err);
       });
     } else if (request.onsuccess === null) {

@@ -246,6 +246,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * Deletes this database.
    */
   Browserbase.prototype.deleteDatabase = function deleteDatabase () {
+    this.close();
     return Browserbase.deleteDatabase(this.name);
   };
 
@@ -869,7 +870,9 @@ function requestToPromise(request, transaction, errorDispatcher) {
     if (transaction) {
       if (!transaction.promise) { transaction.promise = requestToPromise(transaction, null, errorDispatcher); }
       transaction.promise = transaction.promise.then(function () { return resolve(request.result); }, function (err) {
-        reject(request.error || err);
+        var requestError;
+        try { requestError = request.error; } catch(e) {}
+        reject(requestError || err);
         return Promise.reject(err);
       });
     } else if (request.onsuccess === null) {
