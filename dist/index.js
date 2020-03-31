@@ -270,6 +270,8 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
       var store = this$1[key];
       if (!(store instanceof ObjectStore)) { return; }
       db[key] = new ObjectStore(db, store.name, store.keyPath);
+      db[key].store = store.store;
+      db[key].revive = store.revive;
     });
 
     try {
@@ -901,9 +903,18 @@ function safariMultiStoreFix(storeNames) {
 
 
 function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, browserbase) {
-  var versions = Object.keys(versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; });
+  var versions;
+  // Optimization for creating a new database. A version 0 may be used as the "latest" version to create a database.
+  if (oldVersion === 0 && versionMap[0]) {
+    versions = [ 0 ];
+  } else {
+    versions = Object.keys(versionMap)
+      .map(function (key) { return parseInt(key); })
+      .filter(function (version) { return version > oldVersion; })
+      .sort(function (a, b) { return a - b; });
+  }
+
   versions.forEach(function (version) {
-    if (version <= oldVersion) { return; }
     var stores = versionMap[version];
     Object.keys(stores).forEach(function (name) {
       var indexesString = stores[name];

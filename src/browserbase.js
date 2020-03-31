@@ -180,6 +180,8 @@ export default class Browserbase extends EventDispatcher {
       const store = this[key];
       if (!(store instanceof ObjectStore)) return;
       db[key] = new ObjectStore(db, store.name, store.keyPath);
+      db[key].store = store.store;
+      db[key].revive = store.revive;
     });
 
     try {
@@ -767,9 +769,18 @@ function safariMultiStoreFix(storeNames) {
 
 
 function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, browserbase) {
-  const versions = Object.keys(versionMap).map(key => parseInt(key)).sort((a, b) => a - b);
+  let versions;
+  // Optimization for creating a new database. A version 0 may be used as the "latest" version to create a database.
+  if (oldVersion === 0 && versionMap[0]) {
+    versions = [ 0 ];
+  } else {
+    versions = Object.keys(versionMap)
+      .map(key => parseInt(key))
+      .filter(version => version > oldVersion)
+      .sort((a, b) => a - b);
+  }
+
   versions.forEach(version => {
-    if (version <= oldVersion) return;
     const stores = versionMap[version];
     Object.keys(stores).forEach(name => {
       const indexesString = stores[name];
@@ -782,7 +793,7 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, brows
       addStores(browserbase, db, transaction);
       handler(oldVersion, transaction);
     }
-  })
+  });
 }
 
 
