@@ -74,6 +74,7 @@ export default class Browserbase extends EventDispatcher {
     this._versionMap = {};
     this._versionHandlers = {};
     this._onStorage = null;
+    this._storageEvents = {};
   }
 
   /**
@@ -238,8 +239,11 @@ export default class Browserbase extends EventDispatcher {
     if (this.parentDb) {
       this.parentDb.dispatchChange(store, obj, key, from, this._dispatchRemote);
     } else if (from === 'local') {
-      let itemKey = `browserbase/${this.name}/${store.name}`;
+      const id = createId();
+      let itemKey = `browserbase/${this.name}/${store.name}/${id}`;
       // Stringify the key since it could be a string, number, or even an array
+      this._storageEvents[id] = true;
+      setTimeout(() => delete this._storageEvents[id], 2000);
       localStorage.setItem(itemKey, JSON.stringify(key));
       localStorage.removeItem(itemKey);
     }
@@ -861,8 +865,9 @@ function onOpen(browserbase) {
     if (event.storageArea !== localStorage) return;
     if (event.newValue === null || event.newValue === '') return;
     if (event.key.slice(0, prefix.length) !== prefix) return;
+    if (browserbase._storageEvents[event.key.split('/').pop()]) return; // Safari fix, dispatches to own tab
     try {
-      const storeName = event.key.replace(prefix, '');
+      const storeName = event.key.replace(prefix, '').split('/')[0];
       const key = JSON.parse(event.newValue);
       const store = browserbase[storeName];
       if (store) {
@@ -911,4 +916,15 @@ function getStoreOptions(keyString) {
   }
   if (keyPath) storeOptions.keyPath = keyPath;
   return storeOptions;
+}
+
+const chars = ('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz').split('');
+
+function createId() {
+  let length = 6;
+  let id = '';
+  while (length--) {
+    id += chars[Math.random() * chars.length | 0];
+  }
+  return id;
 }

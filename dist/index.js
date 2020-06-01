@@ -149,6 +149,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this._versionMap = {};
     this._versionHandlers = {};
     this._onStorage = null;
+    this._storageEvents = {};
   }
 
   if ( EventDispatcher ) Browserbase.__proto__ = EventDispatcher;
@@ -323,6 +324,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @param {String}      from   The source of this event, whether it was from the 'local' window or a 'remote' window
    */
   Browserbase.prototype.dispatchChange = function dispatchChange (store, obj, key, from, dispatchRemote) {
+    var this$1 = this;
     if ( from === void 0 ) from = 'local';
     if ( dispatchRemote === void 0 ) dispatchRemote = false;
 
@@ -333,8 +335,11 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     if (this.parentDb) {
       this.parentDb.dispatchChange(store, obj, key, from, this._dispatchRemote);
     } else if (from === 'local') {
-      var itemKey = "browserbase/" + (this.name) + "/" + (store.name);
+      var id = createId();
+      var itemKey = "browserbase/" + (this.name) + "/" + (store.name) + "/" + id;
       // Stringify the key since it could be a string, number, or even an array
+      this._storageEvents[id] = true;
+      setTimeout(function () { return delete this$1._storageEvents[id]; }, 2000);
       localStorage.setItem(itemKey, JSON.stringify(key));
       localStorage.removeItem(itemKey);
     }
@@ -995,8 +1000,9 @@ function onOpen(browserbase) {
     if (event.storageArea !== localStorage) { return; }
     if (event.newValue === null || event.newValue === '') { return; }
     if (event.key.slice(0, prefix.length) !== prefix) { return; }
+    if (browserbase._storageEvents[event.key.split('/').pop()]) { return; } // Safari fix, dispatches to own tab
     try {
-      var storeName = event.key.replace(prefix, '');
+      var storeName = event.key.replace(prefix, '').split('/')[0];
       var key = JSON.parse(event.newValue);
       var store = browserbase[storeName];
       if (store) {
@@ -1047,6 +1053,17 @@ function getStoreOptions(keyString) {
   }
   if (keyPath) { storeOptions.keyPath = keyPath; }
   return storeOptions;
+}
+
+var chars = ('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz').split('');
+
+function createId() {
+  var length = 6;
+  var id = '';
+  while (length--) {
+    id += chars[Math.random() * chars.length | 0];
+  }
+  return id;
 }
 
 exports.Browserbase = Browserbase;
