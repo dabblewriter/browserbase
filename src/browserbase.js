@@ -289,6 +289,9 @@ class ObjectStore extends EventDispatcher {
   }
 
   _transStore(mode) {
+    if (!this.db._current && !this.db.db) {
+      throw new Error('Database is not opened');
+    }
     try {
       let trans = this.db._current || this.db.db.transaction(this.name, mode);
       return trans.objectStore(this.name);

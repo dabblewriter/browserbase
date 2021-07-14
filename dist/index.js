@@ -391,6 +391,9 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
   ObjectStore.prototype._transStore = function _transStore (mode) {
     var this$1 = this;
 
+    if (!this.db._current && !this.db.db) {
+      throw new Error('Database is not opened');
+    }
     try {
       var trans = this.db._current || this.db.db.transaction(this.name, mode);
       return trans.objectStore(this.name);
