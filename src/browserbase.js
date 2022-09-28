@@ -1,6 +1,5 @@
 import EventDispatcher from './event-dispatcher';
 const maxString = String.fromCharCode(65535);
-const localStorage = window.localStorage;
 const noop = data => data;
 
 
@@ -58,17 +57,21 @@ export default class Browserbase extends EventDispatcher {
    * @return {Promise}
    */
   static deleteDatabase(name) {
-    return requestToPromise(window.indexedDB.deleteDatabase(name));
+    return requestToPromise(indexedDB.deleteDatabase(name));
   }
 
   /**
    * Creates a new indexeddb database with the given name.
+   * @param  {String} name           The name of the database, stored in IndexedDB
+   * @param  {Object} options        Options for this database.
+   * @param           {Boolean} dontDispatch      If true, don't use localStorage to dispatch events across tabs. Use
+   *                                              this if using Browserbase in a worker for e.g.
    */
-  constructor(name, parentDb) {
+  constructor(name, options) {
     super();
     this.name = name;
     this.db = null;
-    this.parentDb = parentDb;
+    this.options = options || {};
     this._dispatchRemote = false;
     this._current = null;
     this._versionMap = {};
@@ -82,7 +85,7 @@ export default class Browserbase extends EventDispatcher {
    * @param  {Number} version           The version number
    * @param  {Object} stores            An object with store name as the key and a comma-delimited string of indexes
    * @param  {Function} upgradeFunction An optional function that will be called when upgrading, used for data updates
-   * @return {Browserbase}                A reference to itself
+   * @return {Browserbase}              A reference to itself
    */
   version(version, stores, upgradeFunction) {
     this._versionMap[version] = stores;
@@ -126,7 +129,7 @@ export default class Browserbase extends EventDispatcher {
     let upgradedFrom = null;
 
     return this._opening = new Promise((resolve, reject) => {
-      let request = window.indexedDB.open(this.name, version);
+      let request = indexedDB.open(this.name, version);
       request.onsuccess = successHandler(resolve);
       request.onerror = errorHandler(reject, this);
       request.onupgradeneeded = event => {
@@ -229,16 +232,14 @@ export default class Browserbase extends EventDispatcher {
    * @param {ObjectStore} store  The object store this object is stored in
    * @param {Object}      obj    The object being modified or null if the object is deleted
    * @param {mixed}       key    The key of the object being changed or deleted
-   * @param {String}      from   The source of this event, whether it was from the 'local' window or a 'remote' window
+   * @param {String}      from   The source of this event, whether it was from the 'local' scope or a 'remote' scope
    */
   dispatchChange(store, obj, key, from = 'local', dispatchRemote = false) {
     const declaredFrom = this._dispatchRemote || dispatchRemote ? 'remote' : from;
     this[store.name].dispatchEvent('change', obj, key, declaredFrom);
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
-    if (this.parentDb) {
-      this.parentDb.dispatchChange(store, obj, key, from, this._dispatchRemote);
-    } else if (from === 'local') {
+    if (from === 'local' && !this.options.dontDispatch) {
       const id = createId();
       let itemKey = `browserbase/${this.name}/${store.name}/${id}`;
       // Stringify the key since it could be a string, number, or even an array
@@ -254,9 +255,6 @@ export default class Browserbase extends EventDispatcher {
    */
   dispatchError(err) {
     this.dispatchEvent('error', err);
-    if (this.parentDb) {
-      this.dispatchEvent('error', err);
-    }
   }
 
   /**
@@ -863,31 +861,33 @@ function onOpen(browserbase) {
   };
   db.onclose = () => onClose(browserbase);
   db.onerror = event => browserbase.dispatchEvent('error', event.target.error);
-  const prefix = `browserbase/${browserbase.name}/`;
-  browserbase._onStorage = event => {
-    if (event.storageArea !== localStorage) return;
-    if (event.newValue === null || event.newValue === '') return;
-    if (event.key.slice(0, prefix.length) !== prefix) return;
-    if (browserbase._storageEvents[event.key.split('/').pop()]) return; // Safari fix, dispatches to own tab
-    try {
-      const storeName = event.key.replace(prefix, '').split('/')[0];
-      const key = JSON.parse(event.newValue);
-      const store = browserbase[storeName];
-      if (store) {
-        if (browserbase.hasListeners('change') || store.hasListeners('change')) {
-          store.get(key).then((object = null) => {
-            browserbase.dispatchChange(store, object, key, 'remote');
-          });
+  if (!browserbase.options.dontDispatch) {
+    const prefix = `browserbase/${browserbase.name}/`;
+    browserbase._onStorage = event => {
+      if (event.storageArea !== localStorage) return;
+      if (event.newValue === null || event.newValue === '') return;
+      if (event.key.slice(0, prefix.length) !== prefix) return;
+      if (browserbase._storageEvents[event.key.split('/').pop()]) return; // Safari fix, dispatches to own tab
+      try {
+        const storeName = event.key.replace(prefix, '').split('/')[0];
+        const key = JSON.parse(event.newValue);
+        const store = browserbase[storeName];
+        if (store) {
+          if (browserbase.hasListeners('change') || store.hasListeners('change')) {
+            store.get(key).then((object = null) => {
+              browserbase.dispatchChange(store, object, key, 'remote');
+            });
+          }
+        } else {
+          console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
         }
-      } else {
-        console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
+      } catch (err) {
+        console.warn('Error parsing object change from browserbase:', err);
       }
-    } catch (err) {
-      console.warn('Error parsing object change from browserbase:', err);
-    }
-  };
+    };
 
-  window.addEventListener('storage', browserbase._onStorage);
+    addEventListener('storage', browserbase._onStorage);
+  }
 
   // Store keyPath's for each store
   addStores(browserbase, db, db.transaction(safariMultiStoreFix(db.objectStoreNames), 'readonly'));
@@ -903,7 +903,7 @@ function addStores(browserbase, db, transaction) {
 }
 
 function onClose(browserbase) {
-  window.removeEventListener('storage', browserbase._onStorage);
+  removeEventListener('storage', browserbase._onStorage);
   browserbase.db = null;
   browserbase.dispatchEvent('close');
 }

@@ -183,13 +183,13 @@ describe('Browserbase', () => {
   it('should allow one transaction for many puts', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      expect(db.foo._transStore('readonly').transaction).to.not.equal(db.current);
-      db.start();
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      expect(db.foo._transStore('readonly').transaction).to.equal(db.current);
-      return db.commit();
+      expect(db.foo._transStore('readonly').transaction).to.not.equal(db._current);
+      const trans = db.start();
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      expect(trans.foo._transStore('readonly').transaction).to.equal(trans._current);
+      return trans.commit();
     });
   });
 
@@ -199,20 +199,20 @@ describe('Browserbase', () => {
     let success2;
 
     return db.open().then(() => {
-      db.start();
-      db.foo.add({ key: 'test1' }).then(id => {
+      const trans = db.start();
+      trans.foo.add({ key: 'test1' }).then(id => {
         success1 = true;
       }, err => {
         success1 = false;
       });
-      db.foo.put({ key: 'test2', unique: 10 }).then(id => {
+      trans.foo.put({ key: 'test2', unique: 10 }).then(id => {
         success2 = true;
       }, err => {
         success2 = false;
       });
-      db.foo.add({ key: 'test1' });
-      db.foo.put({ key: 'test3', unique: 10 });
-      return db.commit().catch(() => {
+      trans.foo.add({ key: 'test1' });
+      trans.foo.put({ key: 'test3', unique: 10 });
+      return trans.commit().catch(() => {
         expect(success1, 'add did not give an error').to.be.false;
         expect(success2, 'put did not give an error').to.be.false;
       }).then(() => {
@@ -228,11 +228,11 @@ describe('Browserbase', () => {
     let success = false;
 
     return db.open().then(() => {
-      db.start();
-      db.foo.add({ key: 'test1', unique: 10 });
-      db.foo.add({ key: 'test2', unique: 11 });
-      db.foo.add({ key: 'test3', unique: 12 });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.add({ key: 'test1', unique: 10 });
+      trans.foo.add({ key: 'test2', unique: 11 });
+      trans.foo.add({ key: 'test3', unique: 12 });
+      return trans.commit().then(() => {
         db.foo.on('change', (obj, key, from) => {
           success = true;
         });
@@ -261,11 +261,11 @@ describe('Browserbase', () => {
   it('should get all objects', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      db.start();
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      return trans.commit().then(() => {
         return db.foo.getAll().then(objects => {
           expect(objects).to.have.lengthOf(3);
         });
@@ -277,7 +277,7 @@ describe('Browserbase', () => {
     db.version(1, { foo: 'key', bar: ', test', baz: '++id' });
     return db.open().then(() => {
       expect(db.foo.keyPath).to.equal('key');
-      expect(db.bar.keyPath).to.equal('');
+      expect(db.bar.keyPath).to.equal(null);
       expect(db.baz.keyPath).to.equal('id');
     });
   });
@@ -285,14 +285,14 @@ describe('Browserbase', () => {
   it('should get a range of objects', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      db.start();
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      db.foo.put({ key: 'test4' });
-      db.foo.put({ key: 'test5' });
-      db.foo.put({ key: 'test6' });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      trans.foo.put({ key: 'test4' });
+      trans.foo.put({ key: 'test5' });
+      trans.foo.put({ key: 'test6' });
+      return trans.commit().then(() => {
         return db.foo.where('key').startsAt('test2').endsBefore('test5').getAll().then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test2' },
@@ -307,14 +307,14 @@ describe('Browserbase', () => {
   it('should get a range of objects with limit', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      db.start();
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      db.foo.put({ key: 'test4' });
-      db.foo.put({ key: 'test5' });
-      db.foo.put({ key: 'test6' });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      trans.foo.put({ key: 'test4' });
+      trans.foo.put({ key: 'test5' });
+      trans.foo.put({ key: 'test6' });
+      return trans.commit().then(() => {
         return db.foo.where('key').startsAt('test2').endsBefore('test5').limit(2).getAll().then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test2' },
@@ -328,15 +328,15 @@ describe('Browserbase', () => {
   it('should cursor over a range of objects with limit', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      db.start();
+      const trans = db.start();
       let objects = [];
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      db.foo.put({ key: 'test4' });
-      db.foo.put({ key: 'test5' });
-      db.foo.put({ key: 'test6' });
-      return db.commit().then(() => {
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      trans.foo.put({ key: 'test4' });
+      trans.foo.put({ key: 'test5' });
+      trans.foo.put({ key: 'test6' });
+      return trans.commit().then(() => {
         return db.foo.where('key').startsAt('test2').endsBefore('test5').limit(2)
         .forEach(obj => objects.push(obj)).then(() => {
           expect(objects).to.deep.equal([
@@ -351,14 +351,14 @@ describe('Browserbase', () => {
   it('should delete a range of objects', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      db.start();
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      db.foo.put({ key: 'test4' });
-      db.foo.put({ key: 'test5' });
-      db.foo.put({ key: 'test6' });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      trans.foo.put({ key: 'test4' });
+      trans.foo.put({ key: 'test5' });
+      trans.foo.put({ key: 'test6' });
+      return trans.commit().then(() => {
         return db.foo.where('key').startsAfter('test2').endsAt('test5').deleteAll().then(() => db.foo.getAll()).then(objects => {
           expect(objects).to.deep.equal([
             { key: 'test1' },
@@ -373,14 +373,14 @@ describe('Browserbase', () => {
   it('should update a range of objects', () => {
     db.version(1, { foo: 'key' });
     return db.open().then(() => {
-      db.start();
-      db.foo.put({ key: 'test1' });
-      db.foo.put({ key: 'test2' });
-      db.foo.put({ key: 'test3' });
-      db.foo.put({ key: 'test4' });
-      db.foo.put({ key: 'test5' });
-      db.foo.put({ key: 'test6' });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.put({ key: 'test1' });
+      trans.foo.put({ key: 'test2' });
+      trans.foo.put({ key: 'test3' });
+      trans.foo.put({ key: 'test4' });
+      trans.foo.put({ key: 'test5' });
+      trans.foo.put({ key: 'test6' });
+      return trans.commit().then(() => {
         return db.foo.where('key').startsAt('test2').endsAt('test5').update(obj => {
           if (obj.key === 'test2') return null;
           if (obj.key === 'test5') return;
@@ -403,13 +403,13 @@ describe('Browserbase', () => {
     db.version(1, { foo: 'key, [name + date]' });
 
     return db.open().then(() => {
-      db.start();
-      db.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
-      db.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
-      db.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
-      db.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
-      db.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
+      trans.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
+      trans.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
+      trans.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
+      trans.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
+      return trans.commit().then(() => {
         return db.foo.where('[name+ date]').getAll();
       }).then(objs => {
         expect(objs).to.deep.equal([
@@ -435,13 +435,13 @@ describe('Browserbase', () => {
     db.version(1, { foo: '[name + date]' });
 
     return db.open().then(() => {
-      db.start();
-      db.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
-      db.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
-      db.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
-      db.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
-      db.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
+      trans.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
+      trans.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
+      trans.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
+      trans.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
+      return trans.commit().then(() => {
         return db.foo.where().getAll();
       }).then(objs => {
         expect(objs).to.deep.equal([
@@ -467,13 +467,13 @@ describe('Browserbase', () => {
     db.version(1, { foo: 'key, [name + date]' });
 
     return db.open().then(() => {
-      db.start();
-      db.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
-      db.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
-      db.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
-      db.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
-      db.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
-      return db.commit().then(() => {
+      const trans = db.start();
+      trans.foo.add({ key: 'test4', name: 'b', date: new Date('2010-01-01') });
+      trans.foo.add({ key: 'test1', name: 'a', date: new Date('2004-01-01') });
+      trans.foo.add({ key: 'test2', name: 'a', date: new Date('2005-01-01') });
+      trans.foo.add({ key: 'test3', name: 'a', date: new Date('2002-01-01') });
+      trans.foo.add({ key: 'test5', name: 'b', date: new Date('2000-01-01') });
+      return trans.commit().then(() => {
         return db.foo.where('[name+ date]').startsWith(['a']).getAll();
       }).then(objs => {
         expect(objs).to.deep.equal([

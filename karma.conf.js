@@ -32,8 +32,10 @@ module.exports = function(config) {
 
     rollupPreprocessor: {
       plugins: [ require('rollup-plugin-buble')({ exclude: 'node_modules/**' }) ],
-      format: 'iife',
-      sourcemap: 'inline'
+      output: {
+        format: 'iife',
+        sourcemap: 'inline'
+      }
     },
 
     // test results reporter to use
