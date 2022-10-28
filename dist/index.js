@@ -422,7 +422,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this[store.name].dispatchEvent('change', obj, key, declaredFrom);
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
-    if (from === 'local' && !this.options.dontDispatch) {
+    if (from === 'local' && this._channel) {
       this._channel.postMessage({ path: ((store.name) + "/" + key), obj: obj });
     }
   };
