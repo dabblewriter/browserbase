@@ -1,4 +1,5 @@
 import EventDispatcher from './event-dispatcher';
+import './broadcast-polyfill';
 const maxString = String.fromCharCode(65535);
 const noop = data => data;
 
@@ -64,8 +65,7 @@ export default class Browserbase extends EventDispatcher {
    * Creates a new indexeddb database with the given name.
    * @param  {String} name           The name of the database, stored in IndexedDB
    * @param  {Object} options        Options for this database.
-   * @param           {Boolean} dontDispatch      If true, don't use localStorage to dispatch events across tabs. Use
-   *                                              this if using Browserbase in a worker for e.g.
+   * @param           {Boolean} dontDispatch      If true, don't dispatch events across contexts.
    */
   constructor(name, options) {
     super();
@@ -76,8 +76,7 @@ export default class Browserbase extends EventDispatcher {
     this._current = null;
     this._versionMap = {};
     this._versionHandlers = {};
-    this._onStorage = null;
-    this._storageEvents = {};
+    this._channel = null;
   }
 
   /**
@@ -180,6 +179,7 @@ export default class Browserbase extends EventDispatcher {
 
     const db = new this.constructor(this.name, this);
     db.db = this.db;
+    db._channel = this._channel;
     Object.keys(this).forEach(key => {
       const store = this[key];
       if (!(store instanceof ObjectStore)) return;
@@ -239,14 +239,8 @@ export default class Browserbase extends EventDispatcher {
     this[store.name].dispatchEvent('change', obj, key, declaredFrom);
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
-    if (from === 'local' && !this.options.dontDispatch) {
-      const id = createId();
-      let itemKey = `browserbase/${this.name}/${store.name}/${id}`;
-      // Stringify the key since it could be a string, number, or even an array
-      this._storageEvents[id] = true;
-      setTimeout(() => delete this._storageEvents[id], 2000);
-      localStorage.setItem(itemKey, JSON.stringify(key));
-      localStorage.removeItem(itemKey);
+    if (from === 'local' && this._channel) {
+      this._channel.postMessage({ path: `${store.name}/${key}`, obj });
     }
   }
 
@@ -862,21 +856,15 @@ function onOpen(browserbase) {
   db.onclose = () => onClose(browserbase);
   db.onerror = event => browserbase.dispatchEvent('error', event.target.error);
   if (!browserbase.options.dontDispatch) {
-    const prefix = `browserbase/${browserbase.name}/`;
-    browserbase._onStorage = event => {
-      if (event.storageArea !== localStorage) return;
-      if (event.newValue === null || event.newValue === '') return;
-      if (event.key.slice(0, prefix.length) !== prefix) return;
-      if (browserbase._storageEvents[event.key.split('/').pop()]) return; // Safari fix, dispatches to own tab
+    browserbase._channel = new BroadcastChannel(`browserbase/${browserbase.name}`);
+    browserbase._channel.onmessage = event => {
       try {
-        const storeName = event.key.replace(prefix, '').split('/')[0];
-        const key = JSON.parse(event.newValue);
+        const { path, obj } = event.data;
+        const [ storeName, key ] = path.split('/');
         const store = browserbase[storeName];
         if (store) {
           if (browserbase.hasListeners('change') || store.hasListeners('change')) {
-            store.get(key).then((object = null) => {
-              browserbase.dispatchChange(store, object, key, 'remote');
-            });
+            browserbase.dispatchChange(store, obj, key, 'remote');
           }
         } else {
           console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
@@ -885,8 +873,6 @@ function onOpen(browserbase) {
         console.warn('Error parsing object change from browserbase:', err);
       }
     };
-
-    addEventListener('storage', browserbase._onStorage);
   }
 
   // Store keyPath's for each store
@@ -903,7 +889,8 @@ function addStores(browserbase, db, transaction) {
 }
 
 function onClose(browserbase) {
-  removeEventListener('storage', browserbase._onStorage);
+  if (browserbase._channel) browserbase._channel.close();
+  browserbase._channel = null;
   browserbase.db = null;
   browserbase.dispatchEvent('close');
 }

@@ -86,6 +86,98 @@ function getEventListeners(obj, type) {
   return listeners;
 }
 
+// From https://github.com/JSmith01/broadcastchannel-polyfill/blob/master/index.js
+// with modification for Safari which dispatches storage in tab that set data
+(function(global) {
+  var channels = [];
+
+  function BroadcastChannel(channel) {
+      var $this = this;
+      channel = String(channel);
+
+      var id = '$BroadcastChannel$' + channel + '$';
+
+      channels[id] = channels[id] || [];
+      channels[id].push(this);
+
+      this._name = channel;
+      this._id = id;
+      this._closed = false;
+      this._mc = new MessageChannel();
+      this._mc.port1.start();
+      this._mc.port2.start();
+      this._keys = {};
+
+      global.addEventListener('storage', function(e) {
+          if (e.storageArea !== global.localStorage) { return; }
+          if (e.newValue == null || e.newValue === '') { return; }
+          if (e.key.substring(0, id.length) !== id) { return; }
+          if (this._keys[e.key]) { return; } // Safari fix, dispatches to own tab
+          var data = JSON.parse(e.newValue);
+          $this._mc.port2.postMessage(data);
+      });
+  }
+
+  BroadcastChannel.prototype = {
+      // BroadcastChannel API
+      get name() {
+          return this._name;
+      },
+      postMessage: function(message) {
+          var $this = this;
+          if (this._closed) {
+              var e = new Error();
+              e.name = 'InvalidStateError';
+              throw e;
+          }
+          var value = JSON.stringify(message);
+
+          // Broadcast to other contexts via storage events...
+          var key = this._id + String(Date.now()) + '$' + String(Math.random());
+          this._keys[key] = true;
+          global.localStorage.setItem(key, value);
+          setTimeout(function() {
+              global.localStorage.removeItem(key);
+              delete this._keys[key];
+          }, 500);
+
+          // Broadcast to current context via ports
+          channels[this._id].forEach(function(bc) {
+              if (bc === $this) { return; }
+              bc._mc.port2.postMessage(JSON.parse(value));
+          });
+      },
+      close: function() {
+          if (this._closed) { return; }
+          this._closed = true;
+          this._mc.port1.close();
+          this._mc.port2.close();
+
+          var index = channels[this._id].indexOf(this);
+          channels[this._id].splice(index, 1);
+      },
+
+      // EventTarget API
+      get onmessage() {
+          return this._mc.port1.onmessage;
+      },
+      set onmessage(value) {
+          this._mc.port1.onmessage = value;
+      },
+      addEventListener: function(/*type, listener , useCapture*/) {
+          return this._mc.port1.addEventListener.apply(this._mc.port1, arguments);
+      },
+      removeEventListener: function(/*type, listener , useCapture*/) {
+          return this._mc.port1.removeEventListener.apply(this._mc.port1, arguments);
+      },
+      dispatchEvent: function(/*event*/) {
+          return this._mc.port1.dispatchEvent.apply(this._mc.port1, arguments);
+      },
+  };
+
+  if (!global.BroadcastChannel) { global.BroadcastChannel = BroadcastChannel; }
+})(self);
+
 var maxString = String.fromCharCode(65535);
 var noop = function (data) { return data; };
 
@@ -147,8 +239,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this._current = null;
     this._versionMap = {};
     this._versionHandlers = {};
-    this._onStorage = null;
-    this._storageEvents = {};
+    this._channel = null;
   }
 
   if ( EventDispatcher ) Browserbase.__proto__ = EventDispatcher;
@@ -266,6 +357,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
 
     var db = new this.constructor(this.name, this);
     db.db = this.db;
+    db._channel = this._channel;
     Object.keys(this).forEach(function (key) {
       var store = this$1$1[key];
       if (!(store instanceof ObjectStore)) { return; }
@@ -323,7 +415,6 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @param {String}      from   The source of this event, whether it was from the 'local' scope or a 'remote' scope
    */
   Browserbase.prototype.dispatchChange = function dispatchChange (store, obj, key, from, dispatchRemote) {
-    var this$1$1 = this;
     if ( from === void 0 ) from = 'local';
     if ( dispatchRemote === void 0 ) dispatchRemote = false;
 
@@ -332,13 +423,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
     if (from === 'local' && !this.options.dontDispatch) {
-      var id = createId();
-      var itemKey = "browserbase/" + (this.name) + "/" + (store.name) + "/" + id;
-      // Stringify the key since it could be a string, number, or even an array
-      this._storageEvents[id] = true;
-      setTimeout(function () { return delete this$1$1._storageEvents[id]; }, 2000);
-      localStorage.setItem(itemKey, JSON.stringify(key));
-      localStorage.removeItem(itemKey);
+      this._channel.postMessage({ path: ((store.name) + "/" + key), obj: obj });
     }
   };
 
@@ -993,23 +1078,19 @@ function onOpen(browserbase) {
   db.onclose = function () { return onClose(browserbase); };
   db.onerror = function (event) { return browserbase.dispatchEvent('error', event.target.error); };
   if (!browserbase.options.dontDispatch) {
-    var prefix = "browserbase/" + (browserbase.name) + "/";
-    browserbase._onStorage = function (event) {
-      if (event.storageArea !== localStorage) { return; }
-      if (event.newValue === null || event.newValue === '') { return; }
-      if (event.key.slice(0, prefix.length) !== prefix) { return; }
-      if (browserbase._storageEvents[event.key.split('/').pop()]) { return; } // Safari fix, dispatches to own tab
+    browserbase._channel = new BroadcastChannel(("browserbase/" + (browserbase.name)));
+    browserbase._channel.onmessage = function (event) {
       try {
-        var storeName = event.key.replace(prefix, '').split('/')[0];
-        var key = JSON.parse(event.newValue);
+        var ref = event.data;
+        var path = ref.path;
+        var obj = ref.obj;
+        var ref$1 = path.split('/');
+        var storeName = ref$1[0];
+        var key = ref$1[1];
         var store = browserbase[storeName];
         if (store) {
           if (browserbase.hasListeners('change') || store.hasListeners('change')) {
-            store.get(key).then(function (object) {
-              if ( object === void 0 ) object = null;
-
-              browserbase.dispatchChange(store, object, key, 'remote');
-            });
+            browserbase.dispatchChange(store, obj, key, 'remote');
           }
         } else {
           console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
@@ -1018,8 +1099,6 @@ function onOpen(browserbase) {
         console.warn('Error parsing object change from browserbase:', err);
       }
     };
-
-    addEventListener('storage', browserbase._onStorage);
   }
 
   // Store keyPath's for each store
@@ -1036,7 +1115,8 @@ function addStores(browserbase, db, transaction) {
 }
 
 function onClose(browserbase) {
-  removeEventListener('storage', browserbase._onStorage);
+  if (browserbase._channel) { browserbase._channel.close(); }
+  browserbase._channel = null;
   browserbase.db = null;
   browserbase.dispatchEvent('close');
 }
@@ -1052,17 +1132,6 @@ function getStoreOptions(keyString) {
   }
   if (keyPath) { storeOptions.keyPath = keyPath; }
   return storeOptions;
-}
-
-var chars = ('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz').split('');
-
-function createId() {
-  var length = 6;
-  var id = '';
-  while (length--) {
-    id += chars[Math.random() * chars.length | 0];
-  }
-  return id;
 }
 
 exports.Browserbase = Browserbase;
