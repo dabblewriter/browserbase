@@ -24,7 +24,7 @@
           if (e.storageArea !== global.localStorage) return;
           if (e.newValue == null || e.newValue === '') return;
           if (e.key.substring(0, id.length) !== id) return;
-          if (this._keys[e.key]) return; // Safari fix, dispatches to own tab
+          if ($this._keys[e.key]) return; // Safari fix, dispatches to own tab
           var data = JSON.parse(e.newValue);
           $this._mc.port2.postMessage(data);
       });
@@ -37,7 +37,7 @@
       },
       postMessage: function(message) {
           var $this = this;
-          if (this._closed) {
+          if ($this._closed) {
               var e = new Error();
               e.name = 'InvalidStateError';
               throw e;
@@ -45,16 +45,16 @@
           var value = JSON.stringify(message);
 
           // Broadcast to other contexts via storage events...
-          var key = this._id + String(Date.now()) + '$' + String(Math.random());
-          this._keys[key] = true;
+          var key = $this._id + String(Date.now()) + '$' + String(Math.random());
+          $this._keys[key] = true;
           global.localStorage.setItem(key, value);
           setTimeout(function() {
               global.localStorage.removeItem(key);
-              delete this._keys[key];
+              delete $this._keys[key];
           }, 500);
 
           // Broadcast to current context via ports
-          channels[this._id].forEach(function(bc) {
+          channels[$this._id].forEach(function(bc) {
               if (bc === $this) return;
               bc._mc.port2.postMessage(JSON.parse(value));
           });
