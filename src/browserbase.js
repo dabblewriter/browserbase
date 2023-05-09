@@ -240,7 +240,7 @@ export default class Browserbase extends EventDispatcher {
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
     if (from === 'local' && this._channel) {
-      this._channel.postMessage({ path: `${store.name}/${key}`, obj });
+      postMessage(this, { path: `${store.name}/${key}`, obj });
     }
   }
 
@@ -856,27 +856,44 @@ function onOpen(browserbase) {
   db.onclose = () => onClose(browserbase);
   db.onerror = event => browserbase.dispatchEvent('error', event.target.error);
   if (!browserbase.options.dontDispatch) {
-    browserbase._channel = new BroadcastChannel(`browserbase/${browserbase.name}`);
-    browserbase._channel.onmessage = event => {
-      try {
-        const { path, obj } = event.data;
-        const [ storeName, key ] = path.split('/');
-        const store = browserbase[storeName];
-        if (store) {
-          if (browserbase.hasListeners('change') || store.hasListeners('change')) {
-            browserbase.dispatchChange(store, obj, key, 'remote');
-          }
-        } else {
-          console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
-        }
-      } catch (err) {
-        console.warn('Error parsing object change from browserbase:', err);
-      }
-    };
+    browserbase._channel = createChannel(browserbase);
   }
 
   // Store keyPath's for each store
   addStores(browserbase, db, db.transaction(safariMultiStoreFix(db.objectStoreNames), 'readonly'));
+}
+
+function createChannel(browserbase) {
+  browserbase._channel = new BroadcastChannel(`browserbase/${browserbase.name}`);
+  browserbase._channel.onmessage = event => {
+    try {
+      const { path, obj } = event.data;
+      const [ storeName, key ] = path.split('/');
+      const store = browserbase[storeName];
+      if (store) {
+        if (browserbase.hasListeners('change') || store.hasListeners('change')) {
+          browserbase.dispatchChange(store, obj, key, 'remote');
+        }
+      } else {
+        console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
+      }
+    } catch (err) {
+      console.warn('Error parsing object change from browserbase:', err);
+    }
+  };
+}
+
+function postMessage(browserbase, message) {
+  if (!browserbase._channel) return;
+  try {
+    browserbase._channel.postMessage(message);
+  } catch (e) {
+    // If the channel is closed, create a new one and try again
+    if (e.name === 'InvalidStateError') {
+      createChannel();
+      postMessage(browserbase, message);
+    }
+  }
 }
 
 

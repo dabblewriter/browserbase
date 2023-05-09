@@ -269,10 +269,10 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * Returns a list of the defined versions.
    */
   Browserbase.prototype.getVersions = function getVersions () {
-    var this$1 = this;
+    var this$1$1 = this;
 
     return Object.keys(this._versionMap).map(function (key) {
-      return { version: parseInt(key), stores: this$1._versionMap[key], upgradeFunction: this$1._versionHandlers[key] };
+      return { version: parseInt(key), stores: this$1$1._versionMap[key], upgradeFunction: this$1$1._versionHandlers[key] };
     });
   };
 
@@ -289,7 +289,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise}
    */
   Browserbase.prototype.open = function open () {
-    var this$1 = this;
+    var this$1$1 = this;
 
     if (this._opening) {
       return this._opening;
@@ -303,23 +303,23 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     var upgradedFrom = null;
 
     return this._opening = new Promise(function (resolve, reject) {
-      var request = indexedDB.open(this$1.name, version);
+      var request = indexedDB.open(this$1$1.name, version);
       request.onsuccess = successHandler(resolve);
-      request.onerror = errorHandler(reject, this$1);
+      request.onerror = errorHandler(reject, this$1$1);
       request.onupgradeneeded = function (event) {
-        this$1.db = request.result;
-        this$1.db.onerror = errorHandler(reject, this$1);
-        this$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); }, this$1);
+        this$1$1.db = request.result;
+        this$1$1.db.onerror = errorHandler(reject, this$1$1);
+        this$1$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); }, this$1$1);
         var oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
-        upgrade(oldVersion, request.transaction, this$1.db, this$1._versionMap, this$1._versionHandlers, this$1);
+        upgrade(oldVersion, request.transaction, this$1$1.db, this$1$1._versionMap, this$1$1._versionHandlers, this$1$1);
       };
     }).then(function (db) {
-      this$1.db = db;
-      onOpen(this$1);
-      if (upgradedFrom === 0) { this$1.dispatchEvent('create'); }
-      else if (upgradedFrom) { this$1.dispatchEvent('upgrade', upgradedFrom); }
-      this$1.dispatchEvent('open');
+      this$1$1.db = db;
+      onOpen(this$1$1);
+      if (upgradedFrom === 0) { this$1$1.dispatchEvent('create'); }
+      else if (upgradedFrom) { this$1$1.dispatchEvent('upgrade', upgradedFrom); }
+      this$1$1.dispatchEvent('open');
     });
   };
 
@@ -349,7 +349,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @return {BrowserDB}         A temporary copy of BrowserDB to be used for this transaction only
    */
   Browserbase.prototype.start = function start (storeNames, mode) {
-    var this$1 = this;
+    var this$1$1 = this;
     if ( mode === void 0 ) mode = 'readwrite';
 
     if (!storeNames) { storeNames = this.db.objectStoreNames; }
@@ -359,7 +359,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     db.db = this.db;
     db._channel = this._channel;
     Object.keys(this).forEach(function (key) {
-      var store = this$1[key];
+      var store = this$1$1[key];
       if (!(store instanceof ObjectStore)) { return; }
       db[key] = new ObjectStore(db, store.name, store.keyPath);
       db[key].store = store.store;
@@ -375,12 +375,12 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
         return result;
       }, function (err) {
         if (db._current === trans) { db._current = null; }
-        this$1.dispatchEvent('error', err);
+        this$1$1.dispatchEvent('error', err);
         return Promise.reject(err);
       });
     } catch (err) {
       Promise.resolve().then(function () {
-        this$1.dispatchEvent('error', err);
+        this$1$1.dispatchEvent('error', err);
       });
       throw err;
     }
@@ -395,13 +395,13 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise} The same promise returned by start() which will resolve once the transaction is done.
    */
   Browserbase.prototype.commit = function commit (options) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     if (!this._current) { throw new Error('There is no current transaction to commit.'); }
     var promise = this._current.promise;
     if (options && options.remoteChange) {
       this._dispatchRemote = true;
-      promise.then(function () { return this$1._dispatchRemote = false; });
+      promise.then(function () { return this$1$1._dispatchRemote = false; });
     }
     this._current = null;
     return promise;
@@ -423,7 +423,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
     if (from === 'local' && this._channel) {
-      this._channel.postMessage({ path: ((store.name) + "/" + key), obj: obj });
+      postMessage(this, { path: ((store.name) + "/" + key), obj: obj });
     }
   };
 
@@ -468,7 +468,7 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
   ObjectStore.prototype.constructor = ObjectStore;
 
   ObjectStore.prototype._transStore = function _transStore (mode) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     if (!this.db._current && !this.db.db) {
       throw new Error('Database is not opened');
@@ -478,7 +478,7 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
       return trans.objectStore(this.name);
     } catch (err) {
       Promise.resolve().then(function () {
-        this$1.db.dispatchEvent('error', err);
+        this$1$1.db.dispatchEvent('error', err);
       });
       throw err;
     }
@@ -512,10 +512,10 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise} Resolves with an array of objects
    */
   ObjectStore.prototype.getAll = function getAll () {
-    var this$1 = this;
+    var this$1$1 = this;
 
     return requestToPromise(this._transStore('readonly').getAll(), null, this)
-      .then(function (results) { return results.map(this$1.revive); });
+      .then(function (results) { return results.map(this$1$1.revive); });
   };
 
   /**
@@ -533,11 +533,11 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise}
    */
   ObjectStore.prototype.add = function add (obj, key) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     var store = this._transStore('readwrite');
     return requestToPromise(store.add(this.store(obj), key), store.transaction, this).then(function (key) {
-      this$1.dispatchChange(obj, key);
+      this$1$1.dispatchChange(obj, key);
       return key;
     });
   };
@@ -548,12 +548,12 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise}
    */
   ObjectStore.prototype.addAll = function addAll (array) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     var store = this._transStore('readwrite');
     return Promise.all(array.map(function (obj) {
-      return requestToPromise(store.add(this$1.store(obj)), store.transaction, this$1).then(function (key) {
-        this$1.dispatchChange(obj, key);
+      return requestToPromise(store.add(this$1$1.store(obj)), store.transaction, this$1$1).then(function (key) {
+        this$1$1.dispatchChange(obj, key);
       });
     }));
   };
@@ -575,11 +575,11 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise}
    */
   ObjectStore.prototype.put = function put (obj, key) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     var store = this._transStore('readwrite');
     return requestToPromise(store.put(this.store(obj), key), store.transaction, this).then(function (key) {
-      this$1.dispatchChange(obj, key);
+      this$1$1.dispatchChange(obj, key);
       return key;
     });
   };
@@ -590,12 +590,12 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise}
    */
   ObjectStore.prototype.putAll = function putAll (array) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     var store = this._transStore('readwrite');
     return Promise.all(array.map(function (obj) {
-      return requestToPromise(store.put(this$1.store(obj)), store.transaction, this$1).then(function (key) {
-        this$1.dispatchChange(obj, key);
+      return requestToPromise(store.put(this$1$1.store(obj)), store.transaction, this$1$1).then(function (key) {
+        this$1$1.dispatchChange(obj, key);
       });
     }));
   };
@@ -616,11 +616,11 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @return {Promise}
    */
   ObjectStore.prototype.delete = function delete$1 (key) {
-    var this$1 = this;
+    var this$1$1 = this;
 
     var store = this._transStore('readwrite');
     return requestToPromise(store.delete(key), store.transaction, this).then(function () {
-      this$1.dispatchChange(null, key);
+      this$1$1.dispatchChange(null, key);
     });
   };
 
@@ -782,20 +782,20 @@ Where.prototype.toRange = function toRange () {
  * @return {Promise} Resolves with an array of objects
  */
 Where.prototype.getAll = function getAll () {
-    var this$1 = this;
+    var this$1$1 = this;
 
   var range = this.toRange();
   // Handle reverse with cursor
   if (this._direction === 'prev') {
     var results = [];
     if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.forEach(function (obj) { return results.push(this$1.store.revive(obj)); }).then(function () { return results; });
+    return this.forEach(function (obj) { return results.push(this$1$1.store.revive(obj)); }).then(function () { return results; });
   }
 
   var store = this.store._transStore('readonly');
   var source = this.index ? store.index(this.index) : store;
   return requestToPromise(source.getAll(range, this._limit), null, this)
-    .then(function (results) { return results.map(this$1.store.revive); });
+    .then(function (results) { return results.map(this$1$1.store.revive); });
 };
 
 /**
@@ -821,9 +821,9 @@ Where.prototype.getAllKeys = function getAllKeys () {
  * @return {Promise} Resolves with an object or undefined if none was found
  */
 Where.prototype.get = function get () {
-    var this$1 = this;
+    var this$1$1 = this;
 
-  return this.limit(1).getAll().then(function (result) { return this$1.store.revive(result[0]); });
+  return this.limit(1).getAll().then(function (result) { return this$1$1.store.revive(result[0]); });
 };
 
 /**
@@ -851,13 +851,13 @@ Where.prototype.count = function count () {
  * @return {Promise} Resolves without result when finished
  */
 Where.prototype.deleteAll = function deleteAll () {
-    var this$1 = this;
+    var this$1$1 = this;
 
   // Uses a cursor to delete so that each item can get a change event dispatched for it
   return this.map(function (object, cursor, trans) {
     var key = cursor.primaryKey;
-    return requestToPromise(cursor.delete(), trans, this$1).then(function () {
-      this$1.dispatchChange(null, key);
+    return requestToPromise(cursor.delete(), trans, this$1$1).then(function () {
+      this$1$1.dispatchChange(null, key);
     });
   }, 'readwrite').then(function (promises) { return Promise.all(promises); }).then(function () {});
 };
@@ -868,29 +868,29 @@ Where.prototype.deleteAll = function deleteAll () {
  * @return {Promise}         Resolves without result when the cursor has finished
  */
 Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
-    var this$1 = this;
+    var this$1$1 = this;
     if ( mode === void 0 ) mode = 'readonly';
     if ( keyCursor === void 0 ) keyCursor = false;
 
   return new Promise(function (resolve, reject) {
-    var range = this$1.toRange();
-    var store = this$1.store._transStore(mode);
-    var source = this$1.index ? store.index(this$1.index) : store;
+    var range = this$1$1.toRange();
+    var store = this$1$1.store._transStore(mode);
+    var source = this$1$1.index ? store.index(this$1$1.index) : store;
     var method = keyCursor ? 'openKeyCursor' : 'openCursor';
-    var request = source[method](range, this$1._direction);
+    var request = source[method](range, this$1$1._direction);
     var count = 0;
     request.onsuccess = function (event) {
       var cursor = event.target.result;
       if (cursor) {
         var result = iterator(cursor, store.transaction);
-        if (this$1._limit !== undefined && ++count >= this$1._limit) { result = false; }
+        if (this$1$1._limit !== undefined && ++count >= this$1$1._limit) { result = false; }
         if (result !== false) { cursor.continue(); }
         else { resolve(); }
       } else {
         resolve();
       }
     };
-    request.onerror = errorHandler(reject, this$1);
+    request.onerror = errorHandler(reject, this$1$1);
   });
 };
 
@@ -901,21 +901,21 @@ Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
  * @return {Promise}         Resolves without result when finished
  */
 Where.prototype.update = function update (iterator) {
-    var this$1 = this;
+    var this$1$1 = this;
 
   var ref = this.store;
-    var store = ref.store;
-    var revive = ref.revive;
+    ref.store;
+    ref.revive;
   return this.map(function (object, cursor, trans) {
     var key = cursor.primaryKey;
     var newValue = iterator(object, cursor);
     if (newValue === null) {
-      return requestToPromise(cursor.delete(), trans, this$1).then(function () {
-        this$1.dispatchChange(null, key);
+      return requestToPromise(cursor.delete(), trans, this$1$1).then(function () {
+        this$1$1.dispatchChange(null, key);
       });
     } else if (newValue !== undefined) {
-      return requestToPromise(cursor.update(this$1.store.store(newValue)), trans, this$1).then(function () {
-        this$1.dispatchChange(newValue, key);
+      return requestToPromise(cursor.update(this$1$1.store.store(newValue)), trans, this$1$1).then(function () {
+        this$1$1.dispatchChange(newValue, key);
       });
     } else {
       return undefined;
@@ -929,11 +929,11 @@ Where.prototype.update = function update (iterator) {
  * @return {Promise}         Resolves without result when the cursor has finished
  */
 Where.prototype.forEach = function forEach (iterator, mode) {
-    var this$1 = this;
+    var this$1$1 = this;
     if ( mode === void 0 ) mode = 'readonly';
 
   return this.cursor(function (cursor, trans) {
-    iterator(this$1.store.revive(cursor.value), cursor, trans);
+    iterator(this$1$1.store.revive(cursor.value), cursor, trans);
   }, mode);
 };
 
@@ -1078,31 +1078,48 @@ function onOpen(browserbase) {
   db.onclose = function () { return onClose(browserbase); };
   db.onerror = function (event) { return browserbase.dispatchEvent('error', event.target.error); };
   if (!browserbase.options.dontDispatch) {
-    browserbase._channel = new BroadcastChannel(("browserbase/" + (browserbase.name)));
-    browserbase._channel.onmessage = function (event) {
-      try {
-        var ref = event.data;
-        var path = ref.path;
-        var obj = ref.obj;
-        var ref$1 = path.split('/');
-        var storeName = ref$1[0];
-        var key = ref$1[1];
-        var store = browserbase[storeName];
-        if (store) {
-          if (browserbase.hasListeners('change') || store.hasListeners('change')) {
-            browserbase.dispatchChange(store, obj, key, 'remote');
-          }
-        } else {
-          console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
-        }
-      } catch (err) {
-        console.warn('Error parsing object change from browserbase:', err);
-      }
-    };
+    browserbase._channel = createChannel(browserbase);
   }
 
   // Store keyPath's for each store
   addStores(browserbase, db, db.transaction(safariMultiStoreFix(db.objectStoreNames), 'readonly'));
+}
+
+function createChannel(browserbase) {
+  browserbase._channel = new BroadcastChannel(("browserbase/" + (browserbase.name)));
+  browserbase._channel.onmessage = function (event) {
+    try {
+      var ref = event.data;
+      var path = ref.path;
+      var obj = ref.obj;
+      var ref$1 = path.split('/');
+      var storeName = ref$1[0];
+      var key = ref$1[1];
+      var store = browserbase[storeName];
+      if (store) {
+        if (browserbase.hasListeners('change') || store.hasListeners('change')) {
+          browserbase.dispatchChange(store, obj, key, 'remote');
+        }
+      } else {
+        console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
+      }
+    } catch (err) {
+      console.warn('Error parsing object change from browserbase:', err);
+    }
+  };
+}
+
+function postMessage(browserbase, message) {
+  if (!browserbase._channel) { return; }
+  try {
+    browserbase._channel.postMessage(message);
+  } catch (e) {
+    // If the channel is closed, create a new one and try again
+    if (e.name === 'InvalidStateError') {
+      createChannel();
+      postMessage(browserbase, message);
+    }
+  }
 }
 
 
