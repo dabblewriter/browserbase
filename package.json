@@ -1,6 +1,6 @@
 {
   "name": "browserbase",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "description": "IndexedDB wrapper providing promises, easy versioning, and events, including change events across tabs.",
   "main": "dist/index.js",
   "module": "dist/index.js",
