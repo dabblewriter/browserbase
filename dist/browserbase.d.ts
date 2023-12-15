@@ -79,7 +79,7 @@ export declare class Browserbase extends EventDispatcher implements ErrorDispatc
   /**
    * Creates a new indexeddb database with the given name.
    */
-  constructor(name: string);
+  constructor(name: string, options?: { dontDispatch?: boolean });
 
   /**
    * Defines a version for the database. Additional versions may be added, but existing version should not be changed.
