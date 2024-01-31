@@ -1,78 +1,79 @@
 'use strict';
 
-Object.defineProperty(exports, '__esModule', { value: true });
-
-var slice = Array.prototype.slice;
+const slice = Array.prototype.slice;
 
 /**
  * Simple event dispatcher
  */
-var EventDispatcher = function EventDispatcher() {
-  // Define a non-enumerable "private" property to hold all event listeners
-  Object.defineProperty(this, '_events', { configurable: true, writable: true, value: {} });
-};
+class EventDispatcher {
 
-/**
- * Adds an event listener
- */
-EventDispatcher.prototype.on = function on (type, listener) {
-  this._events[type] = getEventListeners(this, type).concat([listener]);
-  return this;
-};
+  constructor() {
+    // Define a non-enumerable "private" property to hold all event listeners
+    Object.defineProperty(this, '_events', { configurable: true, writable: true, value: {} });
+  }
 
-/**
- * Adds an event listener to be triggered only once
- */
-EventDispatcher.prototype.once = function once (type, listener) {
-  this.on(type, function wrap() {
-    this.off(type, wrap);
-    listener.apply(this, arguments);
-  });
-  return this;
-};
+  /**
+   * Adds an event listener
+   */
+  on(type, listener) {
+    this._events[type] = getEventListeners(this, type).concat([listener]);
+    return this;
+  }
 
-/**
- * Removes a previously added event listener
- */
-EventDispatcher.prototype.off = function off (type, listener) {
-  this._events[type] = getEventListeners(this, type).filter(function(l) {
-    return l !== listener;
-  });
-  return this;
-};
+  /**
+   * Adds an event listener to be triggered only once
+   */
+  once(type, listener) {
+    this.on(type, function wrap() {
+      this.off(type, wrap);
+      listener.apply(this, arguments);
+    });
+    return this;
+  }
 
-/**
- * Checks if there are any event listeners for this event
- */
-EventDispatcher.prototype.hasListeners = function hasListeners (type) {
-  return getEventListeners(this, type).length > 0;
-};
+  /**
+   * Removes a previously added event listener
+   */
+  off(type, listener) {
+    this._events[type] = getEventListeners(this, type).filter(function(l) {
+      return l !== listener;
+    });
+    return this;
+  }
 
-/**
- * Dispatches an event calling all listeners with the given args (minus type).
- */
-EventDispatcher.prototype.dispatchEvent = function dispatchEvent (type /*[, args]*/) {
-  var args = slice.call(arguments, 1);
-  getEventListeners(this, type).forEach(function(listener) {
-    listener.apply(this, args);
-  }, this);
-  return this;
-};
+  /**
+   * Checks if there are any event listeners for this event
+   */
+  hasListeners(type) {
+    return getEventListeners(this, type).length > 0;
+  }
 
-/**
- * Dispatches an event but stops on the first listener to return false. Returns true if no listeners cancel the
- * action. Use for "cancelable" actions to check if they can be performed.
- */
-EventDispatcher.prototype.dispatchCancelableEvent = function dispatchCancelableEvent (type /*[, args]*/) {
-  var args = slice.call(arguments, 1);
-  return getEventListeners(this, type).every(function(listener) {
-    return listener.apply(this, args) !== false;
-  }, this);
-};
+  /**
+   * Dispatches an event calling all listeners with the given args (minus type).
+   */
+  dispatchEvent(type /*[, args]*/) {
+    var args = slice.call(arguments, 1);
+    getEventListeners(this, type).forEach(function(listener) {
+      listener.apply(this, args);
+    }, this);
+    return this;
+  }
 
-EventDispatcher.prototype.removeAllEvents = function removeAllEvents () {
-  this._events = {};
-};
+  /**
+   * Dispatches an event but stops on the first listener to return false. Returns true if no listeners cancel the
+   * action. Use for "cancelable" actions to check if they can be performed.
+   */
+  dispatchCancelableEvent(type /*[, args]*/) {
+    var args = slice.call(arguments, 1);
+    return getEventListeners(this, type).every(function(listener) {
+      return listener.apply(this, args) !== false;
+    }, this);
+  }
+
+  removeAllEvents() {
+    this._events = {};
+  }
+}
 
 
 /**
@@ -109,10 +110,10 @@ function getEventListeners(obj, type) {
       this._keys = {};
 
       global.addEventListener('storage', function(e) {
-          if (e.storageArea !== global.localStorage) { return; }
-          if (e.newValue == null || e.newValue === '') { return; }
-          if (e.key.substring(0, id.length) !== id) { return; }
-          if ($this._keys[e.key]) { return; } // Safari fix, dispatches to own tab
+          if (e.storageArea !== global.localStorage) return;
+          if (e.newValue == null || e.newValue === '') return;
+          if (e.key.substring(0, id.length) !== id) return;
+          if ($this._keys[e.key]) return; // Safari fix, dispatches to own tab
           var data = JSON.parse(e.newValue);
           $this._mc.port2.postMessage(data);
       });
@@ -143,12 +144,12 @@ function getEventListeners(obj, type) {
 
           // Broadcast to current context via ports
           channels[$this._id].forEach(function(bc) {
-              if (bc === $this) { return; }
+              if (bc === $this) return;
               bc._mc.port2.postMessage(JSON.parse(value));
           });
       },
       close: function() {
-          if (this._closed) { return; }
+          if (this._closed) return;
           this._closed = true;
           this._mc.port1.close();
           this._mc.port2.close();
@@ -175,11 +176,11 @@ function getEventListeners(obj, type) {
       },
   };
 
-  if (!global.BroadcastChannel) { global.BroadcastChannel = BroadcastChannel; }
+  if (!global.BroadcastChannel) global.BroadcastChannel = BroadcastChannel;
 })(self);
 
-var maxString = String.fromCharCode(65535);
-var noop = function (data) { return data; };
+const maxString = String.fromCharCode(65535);
+const noop = data => data;
 
 
 /**
@@ -229,9 +230,25 @@ var noop = function (data) { return data; };
  *   console.warn('There was an error opening the database:', err);
  * });
  */
-var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
-  function Browserbase(name, options, parent) {
-    EventDispatcher.call(this);
+class Browserbase extends EventDispatcher {
+
+  /**
+   * Deletes a database by name.
+   * @return {Promise}
+   */
+  static deleteDatabase(name) {
+    return requestToPromise(indexedDB.deleteDatabase(name));
+  }
+
+  /**
+   * Creates a new indexeddb database with the given name.
+   * @param  {String} name           The name of the database, stored in IndexedDB
+   * @param  {Object} options        Options for this database.
+   * @param           {Boolean} dontDispatch      If true, don't dispatch events across contexts.
+   * @param  {Browserbase} parent    The parent database, if this is a transaction
+   */
+  constructor(name, options, parent) {
+    super();
     this.name = name;
     this.db = null;
     this.options = options || {};
@@ -243,10 +260,6 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this.parent = parent;
   }
 
-  if ( EventDispatcher ) Browserbase.__proto__ = EventDispatcher;
-  Browserbase.prototype = Object.create( EventDispatcher && EventDispatcher.prototype );
-  Browserbase.prototype.constructor = Browserbase;
-
   /**
    * Defines a version for the database. Additional versions may be added, but existing version should not be changed.
    * @param  {Number} version           The version number
@@ -254,44 +267,36 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @param  {Function} upgradeFunction An optional function that will be called when upgrading, used for data updates
    * @return {Browserbase}              A reference to itself
    */
-  Browserbase.deleteDatabase = function deleteDatabase (name) {
-    return requestToPromise(indexedDB.deleteDatabase(name));
-  };
-
-  Browserbase.prototype.version = function version (version$1, stores, upgradeFunction) {
-    this._versionMap[version$1] = stores;
+  version(version, stores, upgradeFunction) {
+    this._versionMap[version] = stores;
     if (upgradeFunction) {
-      this._versionHandlers[version$1] = upgradeFunction;
+      this._versionHandlers[version] = upgradeFunction;
     }
     return this;
-  };
+  }
 
   /**
    * Returns a list of the defined versions.
    */
-  Browserbase.prototype.getVersions = function getVersions () {
-    var this$1$1 = this;
-
-    return Object.keys(this._versionMap).map(function (key) {
-      return { version: parseInt(key), stores: this$1$1._versionMap[key], upgradeFunction: this$1$1._versionHandlers[key] };
+  getVersions() {
+    return Object.keys(this._versionMap).map(key => {
+      return { version: parseInt(key), stores: this._versionMap[key], upgradeFunction: this._versionHandlers[key] };
     });
-  };
+  }
 
   /**
    * Whether this database is open or closed.
    * @return {Boolean}
    */
-  Browserbase.prototype.isOpen = function isOpen () {
+  isOpen() {
     return Boolean(this.db);
-  };
+  }
 
   /**
    * Open a database, call this after defining versions.
    * @return {Promise}
    */
-  Browserbase.prototype.open = function open () {
-    var this$1$1 = this;
-
+  open() {
     if (this._opening) {
       return this._opening;
     }
@@ -300,47 +305,47 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
       return Promise.reject(new Error('Must declare at least a version 1 schema for Browserbase'));
     }
 
-    var version = Object.keys(this._versionMap).map(function (key) { return parseInt(key); }).sort(function (a, b) { return a - b; }).pop();
-    var upgradedFrom = null;
+    let version = Object.keys(this._versionMap).map(key => parseInt(key)).sort((a, b) => a - b).pop();
+    let upgradedFrom = null;
 
-    return this._opening = new Promise(function (resolve, reject) {
-      var request = indexedDB.open(this$1$1.name, version);
+    return this._opening = new Promise((resolve, reject) => {
+      let request = indexedDB.open(this.name, version);
       request.onsuccess = successHandler(resolve);
-      request.onerror = errorHandler(reject, this$1$1);
-      request.onupgradeneeded = function (event) {
-        this$1$1.db = request.result;
-        this$1$1.db.onerror = errorHandler(reject, this$1$1);
-        this$1$1.db.onabort = errorHandler(function () { return reject(new Error('Abort')); }, this$1$1);
-        var oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
+      request.onerror = errorHandler(reject, this);
+      request.onupgradeneeded = event => {
+        this.db = request.result;
+        this.db.onerror = errorHandler(reject, this);
+        this.db.onabort = errorHandler(() => reject(new Error('Abort')), this);
+        let oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
-        upgrade(oldVersion, request.transaction, this$1$1.db, this$1$1._versionMap, this$1$1._versionHandlers, this$1$1);
+        upgrade(oldVersion, request.transaction, this.db, this._versionMap, this._versionHandlers, this);
       };
-    }).then(function (db) {
-      this$1$1.db = db;
-      onOpen(this$1$1);
-      if (upgradedFrom === 0) { this$1$1.dispatchEvent('create'); }
-      else if (upgradedFrom) { this$1$1.dispatchEvent('upgrade', upgradedFrom); }
-      this$1$1.dispatchEvent('open');
+    }).then(db => {
+      this.db = db;
+      onOpen(this);
+      if (upgradedFrom === 0) this.dispatchEvent('create');
+      else if (upgradedFrom) this.dispatchEvent('upgrade', upgradedFrom);
+      this.dispatchEvent('open');
     });
-  };
+  }
 
   /**
    * Closes the database.
    */
-  Browserbase.prototype.close = function close () {
-    if (!this.db) { return; }
+  close() {
+    if (!this.db) return;
     this.db.close();
     this._opening = undefined;
     onClose(this);
-  };
+  }
 
   /**
    * Deletes this database.
    */
-  Browserbase.prototype.deleteDatabase = function deleteDatabase () {
+  deleteDatabase() {
     this.close();
     return Browserbase.deleteDatabase(this.name);
-  };
+  }
 
   /**
    * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
@@ -349,45 +354,42 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @param  {String} mode       The mode, defaults to readwrite unlike the indexedDB API
    * @return {BrowserDB}         A temporary copy of BrowserDB to be used for this transaction only
    */
-  Browserbase.prototype.start = function start (storeNames, mode) {
-    var this$1$1 = this;
-    if ( mode === void 0 ) mode = 'readwrite';
+  start(storeNames, mode = 'readwrite') {
+    if (!storeNames) storeNames = this.db.objectStoreNames;
+    if (this._current) throw new Error('Cannot start a new transaction on an existing transaction browserbase');
 
-    if (!storeNames) { storeNames = this.db.objectStoreNames; }
-    if (this._current) { throw new Error('Cannot start a new transaction on an existing transaction browserbase'); }
-
-    var db = new this.constructor(this.name, this.options, this);
+    const db = new this.constructor(this.name, this.options, this);
     db.db = this.db;
     db._channel = this._channel;
-    Object.keys(this).forEach(function (key) {
-      var store = this$1$1[key];
-      if (!(store instanceof ObjectStore)) { return; }
+    Object.keys(this).forEach(key => {
+      const store = this[key];
+      if (!(store instanceof ObjectStore)) return;
       db[key] = new ObjectStore(db, store.name, store.keyPath);
       db[key].store = store.store;
       db[key].revive = store.revive;
     });
 
     try {
-      var trans = db._current = storeNames instanceof IDBTransaction
+      const trans = db._current = storeNames instanceof IDBTransaction
         ? storeNames
         : this.db.transaction(safariMultiStoreFix(storeNames), mode);
-      trans.promise = requestToPromise(trans, null, db).then(function (result) {
-        if (db._current === trans) { db._current = null; }
+      trans.promise = requestToPromise(trans, null, db).then(result => {
+        if (db._current === trans) db._current = null;
         return result;
-      }, function (err) {
-        if (db._current === trans) { db._current = null; }
-        this$1$1.dispatchEvent('error', err);
+      }, err => {
+        if (db._current === trans) db._current = null;
+        this.dispatchEvent('error', err);
         return Promise.reject(err);
       });
     } catch (err) {
-      Promise.resolve().then(function () {
-        this$1$1.dispatchEvent('error', err);
+      Promise.resolve().then(() => {
+        this.dispatchEvent('error', err);
       });
       throw err;
     }
 
     return db;
-  };
+  }
 
   /**
    * Finishes a started transaction so that other transactions may be run. This is not needed for a transaction to run,
@@ -395,18 +397,16 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * code elsewhere.
    * @return {Promise} The same promise returned by start() which will resolve once the transaction is done.
    */
-  Browserbase.prototype.commit = function commit (options) {
-    var this$1$1 = this;
-
-    if (!this._current) { throw new Error('There is no current transaction to commit.'); }
-    var promise = this._current.promise;
+  commit(options) {
+    if (!this._current) throw new Error('There is no current transaction to commit.');
+    const promise = this._current.promise;
     if (options && options.remoteChange) {
       this._dispatchRemote = true;
-      promise.then(function () { return this$1$1._dispatchRemote = false; });
+      promise.then(() => this._dispatchRemote = false);
     }
     this._current = null;
     return promise;
-  };
+  }
 
   /**
    * Dispatches a change event when an object is being added, saved, or deleted. When deleted, the object will be null.
@@ -415,25 +415,22 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @param {mixed}       key    The key of the object being changed or deleted
    * @param {String}      from   The source of this event, whether it was from the 'local' scope or a 'remote' scope
    */
-  Browserbase.prototype.dispatchChange = function dispatchChange (store, obj, key, from, dispatchRemote) {
-    if ( from === void 0 ) from = 'local';
-    if ( dispatchRemote === void 0 ) dispatchRemote = false;
-
-    var declaredFrom = this._dispatchRemote || dispatchRemote ? 'remote' : from;
+  dispatchChange(store, obj, key, from = 'local', dispatchRemote = false) {
+    const declaredFrom = this._dispatchRemote || dispatchRemote ? 'remote' : from;
     this[store.name].dispatchEvent('change', obj, key, declaredFrom);
     this.dispatchEvent('change', store.name, obj, key, declaredFrom);
 
     if (from === 'local' && this._channel) {
-      postMessage(this, { path: ((store.name) + "/" + key), obj: obj });
+      postMessage(this, { path: `${store.name}/${key}`, obj });
     }
-  };
+  }
 
   /**
    * Dispatch an error event.
    */
-  Browserbase.prototype.dispatchError = function dispatchError (err) {
+  dispatchError(err) {
     this.dispatchEvent('error', err);
-  };
+  }
 
   /**
    * Creates or updates a store with the given indexesString. If null will delete the store.
@@ -441,22 +438,22 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
    * @param  {String} indexesString The string definition of the indexes to add to the store
    * @return {Promise}           Resolves with an array which is the return result of each iteration
    */
-  Browserbase.prototype.upgradeStore = function upgradeStore$1 (storeName, indexesString) {
-    if (!this._current) { return this.start().upgradeStore(storeName, indexesString); }
+  upgradeStore(storeName, indexesString) {
+    if (!this._current) return this.start().upgradeStore(storeName, indexesString);
     upgradeStore(this.db, this._current, storeName, indexesString);
-  };
+  }
 
-  return Browserbase;
-}(EventDispatcher));
+}
 
 
 /**
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
-  function ObjectStore(db, name, keyPath) {
-    EventDispatcher.call(this);
+class ObjectStore extends EventDispatcher {
+
+  constructor(db, name, keyPath) {
+    super();
     this.db = db;
     this.name = name;
     this.keyPath = keyPath;
@@ -464,68 +461,60 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
     this.revive = noop;
   }
 
-  if ( EventDispatcher ) ObjectStore.__proto__ = EventDispatcher;
-  ObjectStore.prototype = Object.create( EventDispatcher && EventDispatcher.prototype );
-  ObjectStore.prototype.constructor = ObjectStore;
-
-  ObjectStore.prototype._transStore = function _transStore (mode) {
-    var this$1$1 = this;
-
+  _transStore(mode) {
     if (!this.db._current && !this.db.db) {
       throw new Error('Database is not opened');
     }
     try {
-      var trans = this.db._current || this.db.db.transaction(this.name, mode);
+      let trans = this.db._current || this.db.db.transaction(this.name, mode);
       return trans.objectStore(this.name);
     } catch (err) {
-      Promise.resolve().then(function () {
-        this$1$1.db.dispatchEvent('error', err);
+      Promise.resolve().then(() => {
+        this.db.dispatchEvent('error', err);
       });
       throw err;
     }
-  };
+  }
 
   /**
    * Dispatches a change event.
    */
-  ObjectStore.prototype.dispatchChange = function dispatchChange (obj, key) {
+  dispatchChange(obj, key) {
     this.db.dispatchChange(this, obj, key);
-  };
+  }
 
   /**
    * Dispatch an error event.
    */
-  ObjectStore.prototype.dispatchError = function dispatchError (err) {
+  dispatchError(err) {
     this.db.dispatchError(err);
-  };
+  }
 
   /**
    * Get an object from the store by its primary key
    * @param  {mixed} id The key of the object being retreived
    * @return {Promise}  Resolves with the object being retreived
    */
-  ObjectStore.prototype.get = function get (key) {
+  get(key) {
     return requestToPromise(this._transStore('readonly').get(key), null, this).then(this.revive);
-  };
+  }
 
   /**
    * Get all objects in this object store. To get only a range, use where()
    * @return {Promise} Resolves with an array of objects
    */
-  ObjectStore.prototype.getAll = function getAll () {
-    var this$1$1 = this;
-
+  getAll() {
     return requestToPromise(this._transStore('readonly').getAll(), null, this)
-      .then(function (results) { return results.map(this$1$1.revive); });
-  };
+      .then(results => results.map(this.revive));
+  }
 
   /**
    * Gets the count of all objects in this store
    * @return {Promise} Resolves with a number
    */
-  ObjectStore.prototype.count = function count () {
+  count() {
     return requestToPromise(this._transStore('readonly').count(), null, this);
-  };
+  }
 
   /**
    * Adds an object to the store. If an object with the given key already exists, it will not overwrite it.
@@ -533,31 +522,27 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @param {mixed} key Optional, the key of the object when it is not part of the object fields
    * @return {Promise}
    */
-  ObjectStore.prototype.add = function add (obj, key) {
-    var this$1$1 = this;
-
-    var store = this._transStore('readwrite');
-    return requestToPromise(store.add(this.store(obj), key), store.transaction, this).then(function (key) {
-      this$1$1.dispatchChange(obj, key);
+  add(obj, key) {
+    let store = this._transStore('readwrite');
+    return requestToPromise(store.add(this.store(obj), key), store.transaction, this).then(key => {
+      this.dispatchChange(obj, key);
       return key;
     });
-  };
+  }
 
   /**
    * Adds an array of objects to the store in once transaction. You can also call startTransaction and use add().
    * @param {Array} array The array of objects you want to add to the store
    * @return {Promise}
    */
-  ObjectStore.prototype.addAll = function addAll (array) {
-    var this$1$1 = this;
-
-    var store = this._transStore('readwrite');
-    return Promise.all(array.map(function (obj) {
-      return requestToPromise(store.add(this$1$1.store(obj)), store.transaction, this$1$1).then(function (key) {
-        this$1$1.dispatchChange(obj, key);
+  addAll(array) {
+    let store = this._transStore('readwrite');
+    return Promise.all(array.map(obj => {
+      return requestToPromise(store.add(this.store(obj)), store.transaction, this).then(key => {
+        this.dispatchChange(obj, key);
       });
     }));
-  };
+  }
 
   /**
    * Adds an array of objects to the store in once transaction. You can also call startTransaction and use add(). Alias
@@ -565,9 +550,9 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @param {Array} array The array of objects you want to add to the store
    * @return {Promise}
    */
-  ObjectStore.prototype.bulkAdd = function bulkAdd (array) {
+  bulkAdd(array) {
     return this.addAll(array);
-  };
+  }
 
   /**
    * Saves an object to the store. If an object with the given key already exists, it will overwrite it.
@@ -575,31 +560,27 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @param {mixed} key Optional, the key of the object when it is not part of the object fields
    * @return {Promise}
    */
-  ObjectStore.prototype.put = function put (obj, key) {
-    var this$1$1 = this;
-
-    var store = this._transStore('readwrite');
-    return requestToPromise(store.put(this.store(obj), key), store.transaction, this).then(function (key) {
-      this$1$1.dispatchChange(obj, key);
+  put(obj, key) {
+    let store = this._transStore('readwrite');
+    return requestToPromise(store.put(this.store(obj), key), store.transaction, this).then(key => {
+      this.dispatchChange(obj, key);
       return key;
     });
-  };
+  }
 
   /**
    * Saves an array of objects to the store in once transaction. You can also call startTransaction and use put().
    * @param {Array} array The array of objects you want to save to the store
    * @return {Promise}
    */
-  ObjectStore.prototype.putAll = function putAll (array) {
-    var this$1$1 = this;
-
-    var store = this._transStore('readwrite');
-    return Promise.all(array.map(function (obj) {
-      return requestToPromise(store.put(this$1$1.store(obj)), store.transaction, this$1$1).then(function (key) {
-        this$1$1.dispatchChange(obj, key);
+  putAll(array) {
+    let store = this._transStore('readwrite');
+    return Promise.all(array.map(obj => {
+      return requestToPromise(store.put(this.store(obj)), store.transaction, this).then(key => {
+        this.dispatchChange(obj, key);
       });
     }));
-  };
+  }
 
   /**
    * Saves an array of objects to the store in once transaction. You can also call startTransaction and use put(). Alias
@@ -607,31 +588,29 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @param {Array} array The array of objects you want to save to the store
    * @return {Promise}
    */
-  ObjectStore.prototype.bulkPut = function bulkPut (array) {
+  bulkPut(array) {
     return this.putAll(array);
-  };
+  }
 
   /**
    * Deletes an object from the store.
    * @param {mixed} key The key of the object to delete.
    * @return {Promise}
    */
-  ObjectStore.prototype.delete = function delete$1 (key) {
-    var this$1$1 = this;
-
-    var store = this._transStore('readwrite');
-    return requestToPromise(store.delete(key), store.transaction, this).then(function () {
-      this$1$1.dispatchChange(null, key);
+  delete(key) {
+    let store = this._transStore('readwrite');
+    return requestToPromise(store.delete(key), store.transaction, this).then(() => {
+      this.dispatchChange(null, key);
     });
-  };
+  }
 
   /**
    * Deletes all objects from a store.
    * @return {Promise}
    */
-  ObjectStore.prototype.deleteAll = function deleteAll () {
+  deleteAll() {
     return this.where().deleteAll();
-  };
+  }
 
   /**
    * Use to get a subset of items from the store by id or index. Returns a Where object to allow setting the range and
@@ -639,328 +618,307 @@ var ObjectStore = /*@__PURE__*/(function (EventDispatcher) {
    * @param  {String} index The key or index that will be used to retreive the range of objects
    * @return {Where}        A Where instance associated with this object store
    */
-  ObjectStore.prototype.where = function where (index) {
-    if ( index === void 0 ) index = '';
-
+  where(index = '') {
     index = index.replace(/\s/g, '');
     return new Where(this, index === this.keyPath ? '' : index);
-  };
-
-  return ObjectStore;
-}(EventDispatcher));
+  }
+}
 
 
 /**
  * Helps with a ranged getAll or openCursor by helping to create the range and providing a nicer API with returning a
  * promise or iterating through with a callback.
  */
-var Where = function Where(store, index) {
-  this.store = store;
-  this.index = index;
-  this._upper = undefined;
-  this._lower = undefined;
-  this._upperOpen = false;
-  this._lowerOpen = false;
-  this._value = undefined;
-  this._limit = undefined;
-  this._direction = 'next';
-};
-
-/**
- * Dispatches a change event.
- */
-Where.prototype.dispatchChange = function dispatchChange (obj, key) {
-  this.store.dispatchChange(obj, key);
-};
-
-/**
- * Dispatch an error event.
- */
-Where.prototype.dispatchError = function dispatchError (err) {
-  this.store.dispatchError(err);
-};
-
-/**
- * Set greater than the value provided.
- * @param{mixed} value The lower bound
- * @return {Where}     Reference to this
- */
-Where.prototype.startsAfter = function startsAfter (value) {
-  this._lower = value;
-  this._lowerOpen = true;
-  return this;
-};
-
-/**
- * Set greater than or equal to the value provided.
- * @param{mixed} value The lower bound
- * @return {Where}     Reference to this
- */
-Where.prototype.startsAt = function startsAt (value) {
-  this._lower = value;
-  this._lowerOpen = false;
-  return this;
-};
-
-/**
- * Set less than the value provided.
- * @param{mixed} value The upper bound
- * @return {Where}     Reference to this
- */
-Where.prototype.endsBefore = function endsBefore (value) {
-  this._upper = value;
-  this._upperOpen = true;
-  return this;
-};
-
-/**
- * Set less than or equal to the value provided.
- * @param{mixed} value The upper bound
- * @return {Where}     Reference to this
- */
-Where.prototype.endsAt = function endsAt (value) {
-  this._upper = value;
-  this._upperOpen = false;
-  return this;
-};
-
-/**
- * Set the exact match, no range.
- * @param{mixed} value The value that needs matching on
- * @return {Where}     Reference to this
- */
-Where.prototype.equals = function equals (value) {
-  this._value = value;
-  return this;
-};
-
-/**
- * Sets the upper and lower bounds to match any string starting with this prefix.
- * @param{String} prefix The string prefix
- * @return {Where}       Reference to this
- */
-Where.prototype.startsWith = function startsWith (prefix) {
-  return this.startsAt(prefix).endsAt(Array.isArray(prefix) ? prefix.concat([[]]) : prefix + maxString);
-};
-
-/**
- * Limit the return results to the given count.
- * @param{Number} count The max number of objects to return
- * @return {Where}      Reference to this
- */
-Where.prototype.limit = function limit (count) {
-  this._limit = count;
-  return this;
-};
-
-/**
- * Reverses the direction a cursor will get things.
- * @return {Where} Reference to this
- */
-Where.prototype.reverse = function reverse () {
-  this._direction = 'prev';
-  return this;
-};
-
-/**
- * Converts this Where to its IDBKeyRange equivalent.
- * @return {IDBKeyRange} The range this Where represents
- */
-Where.prototype.toRange = function toRange () {
-  if (this._upper !== undefined && this._lower !== undefined) {
-    return IDBKeyRange.bound(this._lower, this._upper, this._lowerOpen, this._upperOpen);
-  } else if (this._upper !== undefined) {
-    return IDBKeyRange.upperBound(this._upper, this._upperOpen);
-  } else if (this._lower !== undefined) {
-    return IDBKeyRange.lowerBound(this._lower, this._lowerOpen);
-  } else if (this._value !== undefined) {
-    return IDBKeyRange.only(this._value);
-  }
-};
-
-/**
- * Get all the objects matching the range limited by the limit.
- * @return {Promise} Resolves with an array of objects
- */
-Where.prototype.getAll = function getAll () {
-    var this$1$1 = this;
-
-  var range = this.toRange();
-  // Handle reverse with cursor
-  if (this._direction === 'prev') {
-    var results = [];
-    if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.forEach(function (obj) { return results.push(this$1$1.store.revive(obj)); }).then(function () { return results; });
+class Where {
+  constructor(store, index) {
+    this.store = store;
+    this.index = index;
+    this._upper = undefined;
+    this._lower = undefined;
+    this._upperOpen = false;
+    this._lowerOpen = false;
+    this._value = undefined;
+    this._limit = undefined;
+    this._direction = 'next';
   }
 
-  var store = this.store._transStore('readonly');
-  var source = this.index ? store.index(this.index) : store;
-  return requestToPromise(source.getAll(range, this._limit), null, this)
-    .then(function (results) { return results.map(this$1$1.store.revive); });
-};
-
-/**
- * Get all the keys matching the range limited by the limit.
- * @return {Promise} Resolves with an array of objects
- */
-Where.prototype.getAllKeys = function getAllKeys () {
-  var range = this.toRange();
-  // Handle reverse with cursor
-  if (this._direction === 'prev') {
-    var results = [];
-    if (this._limit <= 0) { return Promise.resolve(results); }
-    return this.cursor(function (cursor) { return results.push(cursor.key); }, 'readonly', true).then(function () { return results; });
+  /**
+   * Dispatches a change event.
+   */
+  dispatchChange(obj, key) {
+    this.store.dispatchChange(obj, key);
   }
 
-  var store = this.store._transStore('readonly');
-  var source = this.index ? store.index(this.index) : store;
-  return requestToPromise(source.getAllKeys(range, this._limit), null, this);
-};
+  /**
+   * Dispatch an error event.
+   */
+  dispatchError(err) {
+    this.store.dispatchError(err);
+  }
 
-/**
- * Gets a single object, the first one matching the criteria
- * @return {Promise} Resolves with an object or undefined if none was found
- */
-Where.prototype.get = function get () {
-    var this$1$1 = this;
+  /**
+   * Set greater than the value provided.
+   * @param  {mixed} value The lower bound
+   * @return {Where}       Reference to this
+   */
+  startsAfter(value) {
+    this._lower = value;
+    this._lowerOpen = true;
+    return this;
+  }
 
-  return this.limit(1).getAll().then(function (result) { return this$1$1.store.revive(result[0]); });
-};
+  /**
+   * Set greater than or equal to the value provided.
+   * @param  {mixed} value The lower bound
+   * @return {Where}       Reference to this
+   */
+  startsAt(value) {
+    this._lower = value;
+    this._lowerOpen = false;
+    return this;
+  }
 
-/**
- * Gets a single key, the first one matching the criteria
- * @return {Promise} Resolves with an object or undefined if none was found
- */
-Where.prototype.getKey = function getKey () {
-  // Allow reverse() to be used by going through the getAllKeys method
-  return this.limit(1).getAllKeys().then(function (result) { return result[0]; });
-};
+  /**
+   * Set less than the value provided.
+   * @param  {mixed} value The upper bound
+   * @return {Where}       Reference to this
+   */
+  endsBefore(value) {
+    this._upper = value;
+    this._upperOpen = true;
+    return this;
+  }
 
-/**
- * Gets the count of the objects matching the criteria
- * @return {Promise} Resolves with a number
- */
-Where.prototype.count = function count () {
-  var range = this.toRange();
-  var store = this.store._transStore('readonly');
-  var source = this.index ? store.index(this.index) : store;
-  return requestToPromise(source.count(range), null, this);
-};
+  /**
+   * Set less than or equal to the value provided.
+   * @param  {mixed} value The upper bound
+   * @return {Where}       Reference to this
+   */
+  endsAt(value) {
+    this._upper = value;
+    this._upperOpen = false;
+    return this;
+  }
 
-/**
- * Deletes all the objects within this range.
- * @return {Promise} Resolves without result when finished
- */
-Where.prototype.deleteAll = function deleteAll () {
-    var this$1$1 = this;
+  /**
+   * Set the exact match, no range.
+   * @param  {mixed} value The value that needs matching on
+   * @return {Where}       Reference to this
+   */
+  equals(value) {
+    this._value = value;
+    return this;
+  }
 
-  // Uses a cursor to delete so that each item can get a change event dispatched for it
-  return this.map(function (object, cursor, trans) {
-    var key = cursor.primaryKey;
-    return requestToPromise(cursor.delete(), trans, this$1$1).then(function () {
-      this$1$1.dispatchChange(null, key);
-    });
-  }, 'readwrite').then(function (promises) { return Promise.all(promises); }).then(function () {});
-};
+  /**
+   * Sets the upper and lower bounds to match any string starting with this prefix.
+   * @param  {String} prefix The string prefix
+   * @return {Where}         Reference to this
+   */
+  startsWith(prefix) {
+    return this.startsAt(prefix).endsAt(Array.isArray(prefix) ? prefix.concat([[]]) : prefix + maxString);
+  }
 
-/**
- * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
- * @param{Function} iterator A function which will be called for each object with the (object, cursor) signature
- * @return {Promise}         Resolves without result when the cursor has finished
- */
-Where.prototype.cursor = function cursor (iterator, mode, keyCursor) {
-    var this$1$1 = this;
-    if ( mode === void 0 ) mode = 'readonly';
-    if ( keyCursor === void 0 ) keyCursor = false;
+  /**
+   * Limit the return results to the given count.
+   * @param  {Number} count The max number of objects to return
+   * @return {Where}        Reference to this
+   */
+  limit(count) {
+    this._limit = count;
+    return this;
+  }
 
-  return new Promise(function (resolve, reject) {
-    var range = this$1$1.toRange();
-    var store = this$1$1.store._transStore(mode);
-    var source = this$1$1.index ? store.index(this$1$1.index) : store;
-    var method = keyCursor ? 'openKeyCursor' : 'openCursor';
-    var request = source[method](range, this$1$1._direction);
-    var count = 0;
-    request.onsuccess = function (event) {
-      var cursor = event.target.result;
-      if (cursor) {
-        var result = iterator(cursor, store.transaction);
-        if (this$1$1._limit !== undefined && ++count >= this$1$1._limit) { result = false; }
-        if (result !== false) { cursor.continue(); }
-        else { resolve(); }
-      } else {
-        resolve();
-      }
-    };
-    request.onerror = errorHandler(reject, this$1$1);
-  });
-};
+  /**
+   * Reverses the direction a cursor will get things.
+   * @return {Where} Reference to this
+   */
+  reverse() {
+    this._direction = 'prev';
+    return this;
+  }
 
-/**
- * Updates objects using a cursor to update many objects at once matching the range.
- * @param{Function} iterator A function which will be called for each object and which should return the new value
- * for the object, undefined if no changes should be made, or null if the object should be deleted.
- * @return {Promise}         Resolves without result when finished
- */
-Where.prototype.update = function update (iterator) {
-    var this$1$1 = this;
-
-  var ref = this.store;
-    ref.store;
-    ref.revive;
-  return this.map(function (object, cursor, trans) {
-    var key = cursor.primaryKey;
-    var newValue = iterator(object, cursor);
-    if (newValue === null) {
-      return requestToPromise(cursor.delete(), trans, this$1$1).then(function () {
-        this$1$1.dispatchChange(null, key);
-      });
-    } else if (newValue !== undefined) {
-      return requestToPromise(cursor.update(this$1$1.store.store(newValue)), trans, this$1$1).then(function () {
-        this$1$1.dispatchChange(newValue, key);
-      });
-    } else {
-      return undefined;
+  /**
+   * Converts this Where to its IDBKeyRange equivalent.
+   * @return {IDBKeyRange} The range this Where represents
+   */
+  toRange() {
+    if (this._upper !== undefined && this._lower !== undefined) {
+      return IDBKeyRange.bound(this._lower, this._upper, this._lowerOpen, this._upperOpen);
+    } else if (this._upper !== undefined) {
+      return IDBKeyRange.upperBound(this._upper, this._upperOpen);
+    } else if (this._lower !== undefined) {
+      return IDBKeyRange.lowerBound(this._lower, this._lowerOpen);
+    } else if (this._value !== undefined) {
+      return IDBKeyRange.only(this._value);
     }
-  }, 'readwrite').then(function (promises) { return Promise.all(promises); }).then(function () {});
-};
+  }
 
-/**
- * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
- * @param{Function} iterator A function which will be called for each object with the (object, cursor) signature
- * @return {Promise}         Resolves without result when the cursor has finished
- */
-Where.prototype.forEach = function forEach (iterator, mode) {
-    var this$1$1 = this;
-    if ( mode === void 0 ) mode = 'readonly';
+  /**
+   * Get all the objects matching the range limited by the limit.
+   * @return {Promise} Resolves with an array of objects
+   */
+  getAll() {
+    let range = this.toRange();
+    // Handle reverse with cursor
+    if (this._direction === 'prev') {
+      let results = [];
+      if (this._limit <= 0) return Promise.resolve(results);
+      return this.forEach(obj => results.push(this.store.revive(obj))).then(() => results);
+    }
 
-  return this.cursor(function (cursor, trans) {
-    iterator(this$1$1.store.revive(cursor.value), cursor, trans);
-  }, mode);
-};
+    let store = this.store._transStore('readonly');
+    let source = this.index ? store.index(this.index) : store;
+    return requestToPromise(source.getAll(range, this._limit), null, this)
+      .then(results => results.map(this.store.revive));
+  }
 
-/**
- * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one and
- * returning the results of the iterator in an array.
- * @param{Function} iterator A function which will be called for each object with the (object, cursor) signature
- * @return {Promise}         Resolves with an array which is the return result of each iteration
- */
-Where.prototype.map = function map (iterator, mode) {
-    if ( mode === void 0 ) mode = 'readonly';
+  /**
+   * Get all the keys matching the range limited by the limit.
+   * @return {Promise} Resolves with an array of objects
+   */
+  getAllKeys() {
+    let range = this.toRange();
+    // Handle reverse with cursor
+    if (this._direction === 'prev') {
+      let results = [];
+      if (this._limit <= 0) return Promise.resolve(results);
+      return this.cursor(cursor => results.push(cursor.key), 'readonly', true).then(() => results);
+    }
 
-  var results = [];
-  return this.forEach(function (object, cursor, trans) {
-    results.push(iterator(object, cursor, trans));
-  }, mode).then(function () { return results; });
-};
+    let store = this.store._transStore('readonly');
+    let source = this.index ? store.index(this.index) : store;
+    return requestToPromise(source.getAllKeys(range, this._limit), null, this);
+  }
+
+  /**
+   * Gets a single object, the first one matching the criteria
+   * @return {Promise} Resolves with an object or undefined if none was found
+   */
+  get() {
+    return this.limit(1).getAll().then(result => this.store.revive(result[0]));
+  }
+
+  /**
+   * Gets a single key, the first one matching the criteria
+   * @return {Promise} Resolves with an object or undefined if none was found
+   */
+  getKey() {
+    // Allow reverse() to be used by going through the getAllKeys method
+    return this.limit(1).getAllKeys().then(result => result[0]);
+  }
+
+  /**
+   * Gets the count of the objects matching the criteria
+   * @return {Promise} Resolves with a number
+   */
+  count() {
+    let range = this.toRange();
+    let store = this.store._transStore('readonly');
+    let source = this.index ? store.index(this.index) : store;
+    return requestToPromise(source.count(range), null, this);
+  }
+
+  /**
+   * Deletes all the objects within this range.
+   * @return {Promise} Resolves without result when finished
+   */
+  deleteAll() {
+    // Uses a cursor to delete so that each item can get a change event dispatched for it
+    return this.map((object, cursor, trans) => {
+      let key = cursor.primaryKey;
+      return requestToPromise(cursor.delete(), trans, this).then(() => {
+        this.dispatchChange(null, key);
+      });
+    }, 'readwrite').then(promises => Promise.all(promises)).then(() => {});
+  }
+
+  /**
+   * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
+   * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
+   * @return {Promise}           Resolves without result when the cursor has finished
+   */
+  cursor(iterator, mode = 'readonly', keyCursor = false) {
+    return new Promise((resolve, reject) => {
+      let range = this.toRange();
+      let store = this.store._transStore(mode);
+      let source = this.index ? store.index(this.index) : store;
+      let method = keyCursor ? 'openKeyCursor' : 'openCursor';
+      let request = source[method](range, this._direction);
+      let count = 0;
+      request.onsuccess = event => {
+        var cursor = event.target.result;
+        if (cursor) {
+          let result = iterator(cursor, store.transaction);
+          if (this._limit !== undefined && ++count >= this._limit) result = false;
+          if (result !== false) cursor.continue();
+          else resolve();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = errorHandler(reject, this);
+    });
+  }
+
+  /**
+   * Updates objects using a cursor to update many objects at once matching the range.
+   * @param  {Function} iterator A function which will be called for each object and which should return the new value
+   * for the object, undefined if no changes should be made, or null if the object should be deleted.
+   * @return {Promise}           Resolves without result when finished
+   */
+  update(iterator) {
+    this.store;
+    return this.map((object, cursor, trans) => {
+      let key = cursor.primaryKey;
+      let newValue = iterator(object, cursor);
+      if (newValue === null) {
+        return requestToPromise(cursor.delete(), trans, this).then(() => {
+          this.dispatchChange(null, key);
+        });
+      } else if (newValue !== undefined) {
+        return requestToPromise(cursor.update(this.store.store(newValue)), trans, this).then(() => {
+          this.dispatchChange(newValue, key);
+        });
+      } else {
+        return undefined;
+      }
+    }, 'readwrite').then(promises => Promise.all(promises)).then(() => {});
+  }
+
+  /**
+   * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
+   * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
+   * @return {Promise}           Resolves without result when the cursor has finished
+   */
+  forEach(iterator, mode = 'readonly') {
+    return this.cursor((cursor, trans) => {
+      iterator(this.store.revive(cursor.value), cursor, trans);
+    }, mode);
+  }
+
+  /**
+   * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one and
+   * returning the results of the iterator in an array.
+   * @param  {Function} iterator A function which will be called for each object with the (object, cursor) signature
+   * @return {Promise}           Resolves with an array which is the return result of each iteration
+   */
+  map(iterator, mode = 'readonly') {
+    let results = [];
+    return this.forEach((object, cursor, trans) => {
+      results.push(iterator(object, cursor, trans));
+    }, mode).then(() => results);
+  }
+}
 
 
 
 function requestToPromise(request, transaction, errorDispatcher) {
-  return new Promise(function (resolve, reject) {
+  return new Promise((resolve, reject) => {
     if (transaction) {
-      if (!transaction.promise) { transaction.promise = requestToPromise(transaction, null, errorDispatcher); }
-      transaction.promise = transaction.promise.then(function () { return resolve(request.result); }, function (err) {
-        var requestError;
+      if (!transaction.promise) transaction.promise = requestToPromise(transaction, null, errorDispatcher);
+      transaction.promise = transaction.promise.then(() => resolve(request.result), err => {
+        let requestError;
         try { requestError = request.error; } catch(e) {}
         reject(requestError || err);
         return Promise.reject(err);
@@ -968,18 +926,18 @@ function requestToPromise(request, transaction, errorDispatcher) {
     } else if (request.onsuccess === null) {
       request.onsuccess = successHandler(resolve);
     }
-    if (request.oncomplete === null) { request.oncomplete = successHandler(resolve); }
-    if (request.onerror === null) { request.onerror = errorHandler(reject, errorDispatcher); }
-    if (request.onabort === null) { request.onabort = function () { return reject(new Error('Abort')); }; }
+    if (request.oncomplete === null) request.oncomplete = successHandler(resolve);
+    if (request.onerror === null) request.onerror = errorHandler(reject, errorDispatcher);
+    if (request.onabort === null) request.onabort = () => reject(new Error('Abort'));
   });
 }
 
 function successHandler(resolve) {
-  return function (event) { return resolve(event.target.result); };
+  return event => resolve(event.target.result);
 }
 
 function errorHandler(reject, errorDispatcher) {
-  return function (event) {
+  return event => {
     reject(event.target.error);
     errorDispatcher && errorDispatcher.dispatchError(event.target.error);
   };
@@ -991,25 +949,25 @@ function safariMultiStoreFix(storeNames) {
 
 
 function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, browserbase) {
-  var versions;
+  let versions;
   // Optimization for creating a new database. A version 0 may be used as the "latest" version to create a database.
   if (oldVersion === 0 && versionMap[0]) {
     versions = [ 0 ];
   } else {
     versions = Object.keys(versionMap)
-      .map(function (key) { return parseInt(key); })
-      .filter(function (version) { return version > oldVersion; })
-      .sort(function (a, b) { return a - b; });
+      .map(key => parseInt(key))
+      .filter(version => version > oldVersion)
+      .sort((a, b) => a - b);
   }
 
-  versions.forEach(function (version) {
-    var stores = versionMap[version];
-    Object.keys(stores).forEach(function (name) {
-      var indexesString = stores[name];
+  versions.forEach(version => {
+    const stores = versionMap[version];
+    Object.keys(stores).forEach(name => {
+      const indexesString = stores[name];
       upgradeStore(db, transaction, name, indexesString);
     });
 
-    var handler = versionHandlers[version];
+    const handler = versionHandlers[version];
     if (handler) {
       // Ensure browserbase has the current object stores for working with in the handler
       addStores(browserbase, db, transaction);
@@ -1020,8 +978,8 @@ function upgrade(oldVersion, transaction, db, versionMap, versionHandlers, brows
 
 
 function upgradeStore(db, transaction, storeName, indexesString) {
-  var indexes = indexesString && indexesString.split(/\s*,\s*/);
-  var store;
+  const indexes = indexesString && indexesString.split(/\s*,\s*/);
+  let store;
 
   if (indexesString === null) {
     db.deleteObjectStore(storeName);
@@ -1034,11 +992,11 @@ function upgradeStore(db, transaction, storeName, indexesString) {
     store = db.createObjectStore(storeName, getStoreOptions(indexes.shift()));
   }
 
-  indexes.forEach(function (name) {
-    if (!name) { return; }
-    if (name[0] === '-') { return store.deleteIndex(name.replace(/^-[&*]?/, '')); }
+  indexes.forEach(name => {
+    if (!name) return;
+    if (name[0] === '-') return store.deleteIndex(name.replace(/^-[&*]?/, ''));
 
-    var options = {};
+    let options = {};
 
     name = name.replace(/\s/g, '');
     if (name[0] === '&') {
@@ -1048,36 +1006,36 @@ function upgradeStore(db, transaction, storeName, indexesString) {
       name = name.slice(1);
       options.multiEntry = true;
     }
-    var keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
+    let keyPath = name[0] === '[' ? name.replace(/^\[|\]$/g, '').split(/\+/) : name;
     store.createIndex(name, keyPath, options);
   });
 }
 
 
 function onOpen(browserbase) {
-  var db = browserbase.db;
+  const db = browserbase.db;
 
-  db.onversionchange = function (event) {
+  db.onversionchange = event => {
     if (browserbase.dispatchCancelableEvent('versionchange')) {
       if (event.newVersion > 0) {
-        console.warn(("Another connection wants to upgrade database '" + (browserbase.name) + "'. Closing db now to resume the upgrade."));
+        console.warn(`Another connection wants to upgrade database '${browserbase.name}'. Closing db now to resume the upgrade.`);
       } else {
-        console.warn(("Another connection wants to delete database '" + (browserbase.name) + "'. Closing db now to resume the delete request."));
+        console.warn(`Another connection wants to delete database '${browserbase.name}'. Closing db now to resume the delete request.`);
       }
       browserbase.close();
     }
   };
-  db.onblocked = function (event) {
+  db.onblocked = event => {
     if (browserbase.dispatchCancelableEvent('blocked')) {
       if (!event.newVersion || event.newVersion < event.oldVersion) {
-        console.warn(("Browserbase.delete('" + (browserbase.name) + "') was blocked"));
+        console.warn(`Browserbase.delete('${browserbase.name}') was blocked`);
       } else {
-        console.warn(("Upgrade '" + (browserbase.name) + "' blocked by other connection holding version " + (event.oldVersion)));
+        console.warn(`Upgrade '${browserbase.name}' blocked by other connection holding version ${event.oldVersion}`);
       }
     }
   };
-  db.onclose = function () { return onClose(browserbase); };
-  db.onerror = function (event) { return browserbase.dispatchEvent('error', event.target.error); };
+  db.onclose = () => onClose(browserbase);
+  db.onerror = event => browserbase.dispatchEvent('error', event.target.error);
   if (!browserbase.options.dontDispatch) {
     browserbase._channel = createChannel(browserbase);
   }
@@ -1087,22 +1045,18 @@ function onOpen(browserbase) {
 }
 
 function createChannel(browserbase) {
-  browserbase._channel = new BroadcastChannel(("browserbase/" + (browserbase.name)));
-  browserbase._channel.onmessage = function (event) {
+  browserbase._channel = new BroadcastChannel(`browserbase/${browserbase.name}`);
+  browserbase._channel.onmessage = event => {
     try {
-      var ref = event.data;
-      var path = ref.path;
-      var obj = ref.obj;
-      var ref$1 = path.split('/');
-      var storeName = ref$1[0];
-      var key = ref$1[1];
-      var store = browserbase[storeName];
+      const { path, obj } = event.data;
+      const [ storeName, key ] = path.split('/');
+      const store = browserbase[storeName];
       if (store) {
         if (browserbase.hasListeners('change') || store.hasListeners('change')) {
           browserbase.dispatchChange(store, obj, key, 'remote');
         }
       } else {
-        console.warn(("A change event came from another tab for store \"" + storeName + "\", but no such store exists."));
+        console.warn(`A change event came from another tab for store "${storeName}", but no such store exists.`);
       }
     } catch (err) {
       console.warn('Error parsing object change from browserbase:', err);
@@ -1111,7 +1065,7 @@ function createChannel(browserbase) {
 }
 
 function postMessage(browserbase, message) {
-  if (!browserbase._channel) { return; }
+  if (!browserbase._channel) return;
   try {
     browserbase._channel.postMessage(message);
   } catch (e) {
@@ -1125,30 +1079,30 @@ function postMessage(browserbase, message) {
 
 
 function addStores(browserbase, db, transaction) {
-  var names = db.objectStoreNames;
-  for (var i = 0; i < names.length; i++) {
-    var name = names[i];
+  const names = db.objectStoreNames;
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
     browserbase[name] = new ObjectStore(browserbase, name, transaction.objectStore(name).keyPath);
   }
 }
 
 function onClose(browserbase) {
-  if (browserbase._channel) { browserbase._channel.close(); }
+  if (browserbase._channel) browserbase._channel.close();
   browserbase._channel = null;
   browserbase.db = null;
   browserbase.dispatchEvent('close');
 }
 
 function getStoreOptions(keyString) {
-  var keyPath = keyString.replace(/\s/g, '');
-  var storeOptions = {};
+  let keyPath = keyString.replace(/\s/g, '');
+  let storeOptions = {};
   if (keyPath.slice(0, 2) === '++') {
     keyPath = keyPath.replace('++', '');
     storeOptions.autoIncrement = true;
   } else if (keyPath[0] === '[') {
     keyPath = keyPath.replace(/^\[|\]$/g, '').split(/\+/);
   }
-  if (keyPath) { storeOptions.keyPath = keyPath; }
+  if (keyPath) storeOptions.keyPath = keyPath;
   return storeOptions;
 }
 
