@@ -1,5 +1,5 @@
-import EventDispatcher from './event-dispatcher';
 import './broadcast-polyfill';
+import EventDispatcher from './event-dispatcher';
 const maxString = String.fromCharCode(65535);
 const noop = data => data;
 
@@ -66,8 +66,9 @@ export default class Browserbase extends EventDispatcher {
    * @param  {String} name           The name of the database, stored in IndexedDB
    * @param  {Object} options        Options for this database.
    * @param           {Boolean} dontDispatch      If true, don't dispatch events across contexts.
+   * @param  {Browserbase} parent    The parent database, if this is a transaction
    */
-  constructor(name, options) {
+  constructor(name, options, parent) {
     super();
     this.name = name;
     this.db = null;
@@ -77,6 +78,7 @@ export default class Browserbase extends EventDispatcher {
     this._versionMap = {};
     this._versionHandlers = {};
     this._channel = null;
+    this.parent = parent;
   }
 
   /**
@@ -177,7 +179,7 @@ export default class Browserbase extends EventDispatcher {
     if (!storeNames) storeNames = this.db.objectStoreNames;
     if (this._current) throw new Error('Cannot start a new transaction on an existing transaction browserbase');
 
-    const db = new this.constructor(this.name, this);
+    const db = new this.constructor(this.name, this.options, this);
     db.db = this.db;
     db._channel = this._channel;
     Object.keys(this).forEach(key => {

@@ -230,7 +230,7 @@ var noop = function (data) { return data; };
  * });
  */
 var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
-  function Browserbase(name, options) {
+  function Browserbase(name, options, parent) {
     EventDispatcher.call(this);
     this.name = name;
     this.db = null;
@@ -240,6 +240,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     this._versionMap = {};
     this._versionHandlers = {};
     this._channel = null;
+    this.parent = parent;
   }
 
   if ( EventDispatcher ) Browserbase.__proto__ = EventDispatcher;
@@ -355,7 +356,7 @@ var Browserbase = /*@__PURE__*/(function (EventDispatcher) {
     if (!storeNames) { storeNames = this.db.objectStoreNames; }
     if (this._current) { throw new Error('Cannot start a new transaction on an existing transaction browserbase'); }
 
-    var db = new this.constructor(this.name, this);
+    var db = new this.constructor(this.name, this.options, this);
     db.db = this.db;
     db._channel = this._channel;
     Object.keys(this).forEach(function (key) {

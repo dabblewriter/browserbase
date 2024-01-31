@@ -75,6 +75,7 @@ export declare class Browserbase extends EventDispatcher implements ErrorDispatc
 
   name: string;
   db: IDBDatabase;
+  parent?: this;
 
   /**
    * Creates a new indexeddb database with the given name.
