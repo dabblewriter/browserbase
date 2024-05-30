@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist/",
+    "noImplicitAny": true,
+    "moduleResolution": "node",
+    "module": "esnext",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "target": "ES2022",
+    "allowJs": true,
+    "baseUrl": "src",
+    "sourceMap": true,
+    "lib": ["ES2022", "WebWorker"]
+  }
+}
