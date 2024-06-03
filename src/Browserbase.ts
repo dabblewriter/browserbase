@@ -17,17 +17,31 @@ export type UpgradeFunction = (oldVersion?: number, transaction?: IDBTransaction
 export type IDBTransactionMode = 'readonly' | 'readwrite' | 'versionchange';
 export type CursorIterator = (cursor: IDBCursor, transaction: IDBTransaction) => false | any;
 
+export interface ChangeDetail<T = any, K extends IDBValidKey = string> extends StoreChangeDetail<T, K> {
+  store: ObjectStore;
+}
+
+export interface StoreChangeDetail<T = any, K extends IDBValidKey = string> {
+  obj: T;
+  key: K;
+  declaredFrom: 'local' | 'remote';
+}
+
+export interface UpgradeDetail {
+  upgradedFrom: number;
+}
+
 export interface BrowserbaseEventMap {
   create: Event;
-  upgrade: CustomEvent<{ upgradedFrom: number }>;
+  upgrade: CustomEvent<UpgradeDetail>;
   open: Event;
   error: ErrorEvent;
-  change: CustomEvent<{ store: ObjectStore; obj: any; key: any; declaredFrom: 'local' | 'remote' }>;
+  change: CustomEvent<ChangeDetail>;
   blocked: Event;
 }
 
-export interface ObjectStoreEventMap {
-  change: CustomEvent<{ obj: any; key: any; declaredFrom: 'local' | 'remote' }>;
+export interface ObjectStoreEventMap<T = any, K extends IDBValidKey = string> {
+  change: CustomEvent<StoreChangeDetail<T, K>>;
 }
 
 export interface StoreIterator<Type, R = any> {
@@ -332,7 +346,9 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
  * An abstraction on object stores, allowing to more easily work with them without needing to always explicitly create a
  * transaction first. Also helps with ranges and indexes and promises.
  */
-export class ObjectStore<Type = any, Key extends IDBValidKey = string> extends TypedEventTarget<ObjectStoreEventMap> {
+export class ObjectStore<Type = any, Key extends IDBValidKey = string> extends TypedEventTarget<
+  ObjectStoreEventMap<Type, Key>
+> {
   /**
    * Set this function to alter objects to be stored in this database store.
    */
@@ -493,7 +509,7 @@ export class ObjectStore<Type = any, Key extends IDBValidKey = string> extends T
  * Helps with a ranged getAll or openCursor by helping to create the range and providing a nicer API with returning a
  * promise or iterating through with a callback.
  */
-class Where<Type, Key extends IDBValidKey> {
+export class Where<Type, Key extends IDBValidKey> {
   protected _upper: IDBValidKey | undefined;
   protected _lower: IDBValidKey | undefined;
   protected _upperOpen: boolean;
@@ -960,8 +976,3 @@ function getStoreOptions(keyString: string) {
   if (keyPath) storeOptions.keyPath = keyPath;
   return storeOptions;
 }
-
-type DabbleDatabase = {
-  analytics: ObjectStore<{ id: number; name: 'string'; event: any }, number>;
-  project_changes: ObjectStore<{ id: string; version: number }, [string, number]>;
-};

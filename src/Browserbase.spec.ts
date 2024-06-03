@@ -53,17 +53,17 @@ describe('Browserbase', () => {
     db.version(1, { foo: 'bar', bar: 'foo' });
     db.version(2, { foo: 'foobar' });
     await db.open();
-    expect(db.db.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(true);
+    expect(db.db!.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(true);
   });
 
   it('should add onto existing versions which have already been created', async () => {
     db.version(1, { foo: 'bar', bar: 'foo' });
     await db.open();
-    expect(db.db.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(false);
+    expect(db.db!.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(false);
     db.close();
     db.version(2, { foo: 'foobar' });
     await db.open();
-    expect(db.db.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(true);
+    expect(db.db!.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(true);
   });
 
   it('should support deleting indexes from previous versions', async () => {
@@ -71,18 +71,18 @@ describe('Browserbase', () => {
     db.version(2, { foo: 'foobar' });
     db.version(3, { foo: '-foobar' });
     await db.open();
-    expect(db.db.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(false);
+    expect(db.db!.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(false);
   });
 
   it('should delete indexes from previous versions that already exist', async () => {
     db.version(1, { foo: 'bar', bar: 'foo' });
     db.version(2, { foo: 'foobar' });
     await db.open();
-    expect(db.db.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(true);
+    expect(db.db!.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(true);
     db.close();
     db.version(3, { foo: '-foobar' });
     await db.open();
-    expect(db.db.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(false);
+    expect(db.db!.transaction('foo').objectStore('foo').indexNames.contains('foobar')).toBe(false);
   });
 
   it('should add objects to the store', async () => {
@@ -147,7 +147,7 @@ describe('Browserbase', () => {
   });
 
   it('should dispatch a change for add/put/delete', async () => {
-    let lastChange: any, lastKey: string;
+    let lastChange: any, lastKey: string | undefined;
     db.addEventListener('change', ({ detail: { obj, key } }) => {
       lastChange = obj;
       lastKey = key;
@@ -177,8 +177,8 @@ describe('Browserbase', () => {
 
   it.skip('should not report success if the transaction fails', async () => {
     db.version(1, { foo: 'key, &unique' });
-    let success1: boolean;
-    let success2: boolean;
+    let success1: boolean | undefined;
+    let success2: boolean | undefined;
 
     await db.open();
     const trans = db.start();

@@ -3,13 +3,16 @@
     "outDir": "./dist/",
     "noImplicitAny": true,
     "moduleResolution": "node",
-    "module": "esnext",
+    "module": "ESNext",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "target": "ES2022",
     "allowJs": true,
+    "declaration": true,
     "baseUrl": "src",
     "sourceMap": true,
     "lib": ["ES2022", "WebWorker"]
-  }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "src/**/*.spec.ts"]
 }
