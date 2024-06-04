@@ -132,6 +132,7 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
   _versionHandlers: Record<number, UpgradeFunction>;
   _channel: BroadcastChannel | null;
   _opening?: Promise<void>;
+  _closed?: boolean = true;
 
   /**
    * Creates a new indexeddb database with the given name.
@@ -180,6 +181,8 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
    * Open a database, call this after defining versions.
    */
   open() {
+    this._closed = false;
+
     if (this._opening) {
       return this._opening;
     }
@@ -230,6 +233,7 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
    * Closes the database.
    */
   close() {
+    this._closed = true;
     if (!this.db) return;
     this.db.close();
     this._opening = undefined;
@@ -904,7 +908,7 @@ function onOpen(browserbase: Browserbase) {
       browserbase.close();
     }
   };
-  db.onclose = () => browserbase.open();
+  db.onclose = () => !browserbase._closed && browserbase.open();
   db.onerror = event => browserbase.dispatchEvent(new ErrorEvent('error', { error: (event.target as any).error }));
   if (!browserbase.options.dontDispatch) {
     browserbase._channel = createChannel(browserbase);
