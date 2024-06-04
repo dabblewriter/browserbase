@@ -38,6 +38,7 @@ export interface BrowserbaseEventMap {
   error: ErrorEvent;
   change: CustomEvent<ChangeDetail>;
   blocked: Event;
+  close: Event;
 }
 
 export interface ObjectStoreEventMap<T = any, K extends IDBValidKey = string> {
