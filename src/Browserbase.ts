@@ -252,7 +252,7 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
    * Starts a multi-store transaction. All store methods on the returned database clone will be part of this transaction
    * until the next tick or until calling db.commit().
    */
-  start(storeNames?: string[] | IDBTransaction, mode: IDBTransactionMode = 'readwrite') {
+  start(storeNames?: string[] | IDBTransaction, mode: IDBTransactionMode = 'readwrite'): this {
     if (!storeNames) storeNames = Array.from(this.db.objectStoreNames);
     if (this._current) throw new Error('Cannot start a new transaction on an existing transaction browserbase');
 
@@ -293,7 +293,7 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
       throw error;
     }
 
-    return db;
+    return db as this;
   }
 
   /**
