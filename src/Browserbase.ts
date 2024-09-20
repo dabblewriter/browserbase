@@ -908,7 +908,13 @@ function onOpen(browserbase: Browserbase) {
       browserbase.close();
     }
   };
-  db.onclose = () => !browserbase._closed && browserbase.open();
+  db.onclose = async () => {
+    if (!browserbase._closed) {
+      delete browserbase._opening;
+      await browserbase.open();
+      browserbase.dispatchEvent(new Event('recreated'));
+    }
+  };
   db.onerror = event => browserbase.dispatchEvent(new ErrorEvent('error', { error: (event.target as any).error }));
   if (!browserbase.options.dontDispatch) {
     browserbase._channel = createChannel(browserbase);
