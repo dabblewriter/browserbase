@@ -120,4 +120,47 @@ db.open().then(
 );
 ```
 
+### Iteration with Async Generators
+
+Browserbase provides two ways to iterate over database records:
+
+1. **Traditional callback-based cursor** (for backward compatibility):
+```js
+await db.stores.foo.where('name').startsWith('J').cursor((cursor, transaction) => {
+  console.log('Found:', cursor.value);
+  // Return false to stop iteration
+});
+```
+
+2. **New async generator with `entries()`** (recommended for modern code):
+```js
+// Iterate using for-await-of loop
+for await (const { value, key, cursor, transaction } of db.stores.foo.where('name').startsWith('J').entries()) {
+  console.log('Found:', value, 'with key:', key);
+  
+  // You can break early to stop iteration
+  if (someCondition) break;
+  
+  // Access the underlying cursor if needed
+  console.log('Cursor direction:', cursor.direction);
+}
+
+// Works with all Where methods (ranges, limits, etc.)
+for await (const { value, key } of db.stores.foo.where('age').startsAt(18).limit(10).entries()) {
+  console.log('Adult:', value);
+}
+```
+
+The `entries()` method returns an async generator that yields objects with:
+- `value`: The database record (already processed through any `revive` function)
+- `key`: The record's key
+- `cursor`: The underlying IDBCursor for advanced operations
+- `transaction`: The IDBTransaction for this operation
+
+Benefits of the async generator approach:
+- More readable with `for-await-of` syntax
+- Easy to break early or use control flow
+- Integrates well with modern async/await patterns
+- Maintains backward compatibility with existing `cursor()` method
+
 TODO complete documentation

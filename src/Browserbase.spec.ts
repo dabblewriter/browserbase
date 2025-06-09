@@ -314,6 +314,36 @@ describe('Browserbase', () => {
     expect(objects).to.eql([{ key: 'test2' }, { key: 'test3' }]);
   });
 
+  it('should iterate over a range of objects with entries() async generator', async () => {
+    db.version(1, { foo: 'key' });
+    await db.open();
+    const trans = db.start();
+    trans.stores.foo.put({ key: 'test1' });
+    trans.stores.foo.put({ key: 'test2' });
+    trans.stores.foo.put({ key: 'test3' });
+    trans.stores.foo.put({ key: 'test4' });
+    trans.stores.foo.put({ key: 'test5' });
+    trans.stores.foo.put({ key: 'test6' });
+    await trans.commit();
+
+    const objects: any[] = [];
+    const keys: any[] = [];
+    for await (const { value, key, cursor } of db.stores.foo
+      .where('key')
+      .startsAt('test2')
+      .endsBefore('test5')
+      .limit(2)
+      .entries()) {
+      objects.push(value);
+      keys.push(key);
+      expect(cursor).toBeDefined();
+      expect(cursor.key).toEqual(key);
+    }
+    
+    expect(objects).to.eql([{ key: 'test2' }, { key: 'test3' }]);
+    expect(keys).to.eql(['test2', 'test3']);
+  });
+
   it('should delete a range of objects', async () => {
     db.version(1, { foo: 'key' });
     await db.open();

@@ -708,6 +708,41 @@ export class Where<Type, Key extends IDBValidKey> {
   }
 
   /**
+   * Returns an async generator that yields cursor entries for efficient iteration over objects matching the range.
+   */
+  async* entries(mode: IDBTransactionMode = 'readonly', keyCursor = false): AsyncGenerator<{ cursor: IDBCursor; value: Type; key: Key; transaction: IDBTransaction }> {
+    let range = this.toRange();
+    let store = this.store._transStore(mode);
+    let source = this.index ? store.index(this.index) : store;
+    let method: 'openKeyCursor' | 'openCursor' = keyCursor ? 'openKeyCursor' : 'openCursor';
+    let request = source[method](range, this._direction);
+    let count = 0;
+
+    while (true) {
+      const cursor = await new Promise<IDBCursor | null>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = errorHandler(reject, this);
+      });
+
+      if (!cursor || (this._limit !== undefined && count >= this._limit)) {
+        break;
+      }
+
+      const value = keyCursor ? undefined : this.store.revive((cursor as any).value as Type);
+      
+      yield {
+        cursor,
+        value,
+        key: cursor.key as Key,
+        transaction: store.transaction
+      };
+
+      count++;
+      cursor.continue();
+    }
+  }
+
+  /**
    * Uses a cursor to efficiently iterate over the objects matching the range calling the iterator for each one.
    */
   cursor(iterator: CursorIterator, mode: IDBTransactionMode = 'readonly', keyCursor = false) {

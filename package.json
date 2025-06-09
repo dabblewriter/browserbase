@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsc --watch",
     "build": "tsc",
-    "test": "vitest",
+    "test": "vitest run",
+    "tdd": "vitest",
     "prepublishOnly": "npm run build"
   },
   "repository": {
