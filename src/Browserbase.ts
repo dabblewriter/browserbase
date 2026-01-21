@@ -729,7 +729,7 @@ export class Where<Type, Key extends IDBValidKey> {
       }
 
       const value = keyCursor ? undefined : this.store.revive((cursor as any).value as Type);
-      
+
       yield {
         cursor,
         value,
@@ -825,7 +825,7 @@ function requestToPromise<T = unknown>(
           let requestError;
           try {
             requestError = request.error;
-          } catch (e) {}
+          } catch (e) { }
           reject(requestError || err);
           return Promise.reject(err);
         }
@@ -975,7 +975,7 @@ function createChannel(browserbase: Browserbase) {
       console.warn('Error parsing object change from browserbase:', err);
     }
   };
-  return browserbase._channel;
+  return channel;
 }
 
 function postMessage(browserbase: Browserbase, message: any) {
