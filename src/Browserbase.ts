@@ -241,6 +241,11 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        // An upgrade may have already handed us the connection; don't leak it (or leave isOpen() true) on failure.
+        if (this.db && this.db === request.result) {
+          this.db = null;
+          request.result.close();
+        }
         // request.error can be null in real browsers; never reject with nothing.
         reject(error || namedError('UnknownError', `Opening database '${this.name}' failed`));
       };

@@ -617,7 +617,8 @@ describe('Browserbase open lifecycle guards', () => {
       }
     );
 
-    request.result = fakeDatabase();
+    const upgrading = fakeDatabase();
+    request.result = upgrading;
     request.transaction = fakeTransaction();
     request.onupgradeneeded({ oldVersion: 0 });
 
@@ -628,6 +629,9 @@ describe('Browserbase open lifecycle guards', () => {
     expect(state).to.equal('rejected');
     expect(error.name).to.equal('TimeoutError');
     expect(error.message).toContain('80ms');
+    // The connection handed over during upgrade must not leak, and isOpen() must stay false.
+    expect(upgrading.closed).toBe(true);
+    expect(db.db).toBe(null);
   });
 
   it('should open normally when an upgrade finishes within its budget', async () => {
