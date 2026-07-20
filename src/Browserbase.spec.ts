@@ -1,5 +1,5 @@
 import indexeddb, { IDBKeyRange, IDBTransaction } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Browserbase, ObjectStore } from './Browserbase';
 
 // Skipping files that produce errors because either vitest isn't catching them, or fake-indexeddb is throwing them
@@ -475,5 +475,222 @@ describe('Browserbase', () => {
       { key: 'test4', name: 'b', date: new Date('2010-01-01') },
       { key: 'test5', name: 'b', date: new Date('2000-01-01') },
     ]);
+  });
+});
+
+describe('Browserbase open lifecycle guards', () => {
+  const defaultOpenTimeout = Browserbase.openTimeout;
+  const defaultUpgradeTimeout = Browserbase.upgradeTimeout;
+
+  afterEach(() => {
+    Browserbase.openTimeout = defaultOpenTimeout;
+    Browserbase.upgradeTimeout = defaultUpgradeTimeout;
+    vi.restoreAllMocks();
+  });
+
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const newDb = () => new Browserbase('guards' + (Math.random() + '').slice(2), { dontDispatch: true });
+
+  const fakeTransaction = () => ({ objectStore: () => ({ keyPath: 'key', createIndex() {}, deleteIndex() {} }) });
+
+  // A hand-driven stand-in for IDBOpenDBRequest, so tests can fire events at will — or withhold them entirely.
+  function stubOpen() {
+    const request: any = {
+      result: null,
+      transaction: null,
+      onsuccess: null,
+      onerror: null,
+      onblocked: null,
+      onupgradeneeded: null,
+    };
+    vi.spyOn(indexedDB, 'open').mockReturnValue(request);
+    return request;
+  }
+
+  function fakeDatabase() {
+    const names: any = ['foo'];
+    names.contains = (name: string) => names.includes(name);
+    return {
+      closed: false,
+      objectStoreNames: names,
+      transaction: fakeTransaction,
+      close() {
+        this.closed = true;
+      },
+      onerror: null,
+      onabort: null,
+      onversionchange: null,
+      onclose: null,
+    } as any;
+  }
+
+  it('should reject a blocked open only after the timeout, so a brief block can clear', async () => {
+    Browserbase.openTimeout = 40;
+    const request = stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    let state = 'pending';
+    const opening = db.open().then(
+      () => (state = 'resolved'),
+      err => {
+        state = 'rejected';
+        return err;
+      }
+    );
+    request.onblocked({ oldVersion: 1, newVersion: 2 });
+
+    await delay(20);
+    expect(state).to.equal('pending');
+
+    const error = await opening;
+    expect(state).to.equal('rejected');
+    expect(error.name).to.equal('BlockedError');
+    expect(error.message).toContain(db.name);
+  });
+
+  it('should open normally when a blocked open clears before the timeout', async () => {
+    Browserbase.openTimeout = 100;
+    const request = stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    const opening = db.open();
+    request.onblocked({ oldVersion: 1, newVersion: 2 });
+
+    await delay(20);
+    const opened = fakeDatabase();
+    request.result = opened;
+    request.onsuccess();
+
+    await opening;
+    expect(db.db).toBe(opened);
+    expect(opened.closed).toBe(false);
+  });
+
+  it('should reject the open when no event ever fires', async () => {
+    Browserbase.openTimeout = 20;
+    stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    const error = await db.open().catch(err => err);
+    expect(error.name).to.equal('TimeoutError');
+    expect(error.message).toContain('20ms');
+  });
+
+  it('should close a database that opens after the timeout rejected', async () => {
+    Browserbase.openTimeout = 20;
+    Browserbase.upgradeTimeout = 20;
+    const request = stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    const opening = db.open().catch(err => err);
+    const late = fakeDatabase();
+    request.result = late;
+    request.transaction = fakeTransaction();
+    request.onupgradeneeded({ oldVersion: 0 });
+
+    await delay(50);
+    request.onsuccess();
+
+    expect((await opening).name).to.equal('TimeoutError');
+    expect(late.closed).toBe(true);
+    expect(db.db).toBe(null);
+  });
+
+  it('should re-arm the timeout on upgradeneeded but still reject a stalled upgrade', async () => {
+    Browserbase.openTimeout = 20;
+    Browserbase.upgradeTimeout = 80;
+    const request = stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    let state = 'pending';
+    const opening = db.open().then(
+      () => (state = 'resolved'),
+      err => {
+        state = 'rejected';
+        return err;
+      }
+    );
+
+    const upgrading = fakeDatabase();
+    request.result = upgrading;
+    request.transaction = fakeTransaction();
+    request.onupgradeneeded({ oldVersion: 0 });
+
+    await delay(45);
+    expect(state).to.equal('pending');
+
+    const error = await opening;
+    expect(state).to.equal('rejected');
+    expect(error.name).to.equal('TimeoutError');
+    expect(error.message).toContain('80ms');
+    // The connection handed over during upgrade must not leak, and isOpen() must stay false.
+    expect(upgrading.closed).toBe(true);
+    expect(db.db).toBe(null);
+  });
+
+  it('should open normally when an upgrade finishes within its budget', async () => {
+    Browserbase.openTimeout = 20;
+    Browserbase.upgradeTimeout = 500;
+    const request = stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    const opening = db.open();
+    const opened = fakeDatabase();
+    request.result = opened;
+    request.transaction = fakeTransaction();
+    request.onupgradeneeded({ oldVersion: 0 });
+
+    await delay(45);
+    request.onsuccess();
+
+    await opening;
+    expect(db.db).toBe(opened);
+    expect(db.stores).to.have.property('foo');
+    expect(opened.closed).toBe(false);
+  });
+
+  it('should reject deleteDatabase when an open connection blocks it', async () => {
+    const request: any = { error: null, onsuccess: null, onerror: null, onblocked: null };
+    vi.spyOn(indexedDB, 'deleteDatabase').mockReturnValue(request);
+
+    const deleting = Browserbase.deleteDatabase('blocked-db').catch(err => err);
+    request.onblocked();
+
+    const error = await deleting;
+    expect(error.name).to.equal('BlockedError');
+    expect(error.message).toContain('blocked-db');
+  });
+
+  it('should reject deleteDatabase with a real error when the request has none', async () => {
+    const request: any = { error: null, onsuccess: null, onerror: null, onblocked: null };
+    vi.spyOn(indexedDB, 'deleteDatabase').mockReturnValue(request);
+
+    const deleting = Browserbase.deleteDatabase('null-error-db').catch(err => err);
+    request.onerror();
+
+    const error = await deleting;
+    expect(error).to.be.instanceOf(Error);
+    expect(error.message).toContain('null-error-db');
+  });
+
+  it('should return the same promise when open is called twice concurrently', async () => {
+    const open = vi.spyOn(indexedDB, 'open');
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    const first = db.open();
+    const second = db.open();
+    expect(second).toBe(first);
+
+    await first;
+    expect(open).toHaveBeenCalledTimes(1);
+    db.close();
   });
 });

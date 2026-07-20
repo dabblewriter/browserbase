@@ -116,10 +116,26 @@ const transactionPromise = new WeakMap<IDBTransaction, Promise<any>>();
  */
 export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends TypedEventTarget<BrowserbaseEventMap> {
   /**
+   * Milliseconds to wait for indexedDB.open() to fire any event at all before giving up. Some browsers never do.
+   */
+  static openTimeout = 4000;
+
+  /**
+   * Milliseconds to wait for an upgrade to finish once upgradeneeded has fired.
+   */
+  static upgradeTimeout = 30000;
+
+  /**
    * Deletes a database by name.
    */
   static deleteDatabase(name: string) {
-    return requestToPromise(indexedDB.deleteDatabase(name));
+    return new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(name);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error || new Error(`Deleting database '${name}' failed`));
+      request.onblocked = () =>
+        reject(namedError('BlockedError', `Deleting database '${name}' is blocked by an open connection`));
+    });
   }
 
   db: IDBDatabase | null;
@@ -199,8 +215,45 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
 
     return (this._opening = new Promise<IDBDatabase>((resolve, reject) => {
       let request = indexedDB.open(this.name, version);
-      request.onsuccess = successHandler(resolve);
-      request.onerror = errorHandler(reject, this);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let settled = false;
+
+      // Some browsers never fire any event on the open request, leaving callers hanging forever. Give up after a while.
+      const guard = (ms: number, error: Error) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fail(error), ms);
+      };
+      const timeoutError = (action: string, ms: number) =>
+        namedError('TimeoutError', `${action} '${this.name}' timed out after ${ms}ms`);
+
+      const succeed = (db: IDBDatabase) => {
+        if (settled) {
+          // Landed after we gave up on it, so don't leak the connection.
+          if (this.db === db) this.db = null;
+          return db.close();
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(db);
+      };
+
+      const fail = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        // An upgrade may have already handed us the connection; don't leak it (or leave isOpen() true) on failure.
+        if (this.db && this.db === request.result) {
+          this.db = null;
+          request.result.close();
+        }
+        // request.error can be null in real browsers; never reject with nothing.
+        reject(error || namedError('UnknownError', `Opening database '${this.name}' failed`));
+      };
+
+      guard(Browserbase.openTimeout, timeoutError('Opening database', Browserbase.openTimeout));
+
+      request.onsuccess = () => succeed(request.result);
+      request.onerror = errorHandler(fail, this);
       request.onblocked = event => {
         const blockedEvent = new Event('blocked', { cancelable: true });
         this.dispatchEvent(blockedEvent);
@@ -211,22 +264,35 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
             console.warn(`Upgrade '${this.name}' blocked by other connection holding version ${event.oldVersion}`);
           }
         }
+        // A blocked open usually clears in moments (the other tab closes on versionchange), so keep waiting, but
+        // bounded: if it never clears, surface why instead of the generic timeout.
+        guard(
+          Browserbase.openTimeout,
+          namedError('BlockedError', `Opening database '${this.name}' is blocked by a connection in another tab`)
+        );
       };
       request.onupgradeneeded = event => {
+        guard(Browserbase.upgradeTimeout, timeoutError('Upgrading database', Browserbase.upgradeTimeout));
         this.db = request.result;
-        this.db.onerror = errorHandler(reject, this);
-        this.db.onabort = errorHandler(() => reject(new Error('Abort')), this);
+        this.db.onerror = errorHandler(fail, this);
+        this.db.onabort = errorHandler(() => fail(new Error('Abort')), this);
         let oldVersion = event.oldVersion > Math.pow(2, 62) ? 0 : event.oldVersion; // Safari 8 fix.
         upgradedFrom = oldVersion;
         upgrade(oldVersion, request.transaction, this.db, this._versionMap, this._versionHandlers, this);
       };
-    }).then(db => {
-      this.db = db;
-      onOpen(this);
-      if (upgradedFrom === 0) this.dispatchEvent(new Event('create'));
-      else if (upgradedFrom) this.dispatchEvent(new CustomEvent('upgrade', { detail: { upgradedFrom } }));
-      this.dispatchEvent(new Event('open'));
-    }));
+    })
+      .then(db => {
+        this.db = db;
+        onOpen(this);
+        if (upgradedFrom === 0) this.dispatchEvent(new Event('create'));
+        else if (upgradedFrom) this.dispatchEvent(new CustomEvent('upgrade', { detail: { upgradedFrom } }));
+        this.dispatchEvent(new Event('open'));
+      })
+      .catch(error => {
+        // Let callers retry instead of handing them the same failure forever.
+        this._opening = undefined;
+        throw error;
+      }));
   }
 
   /**
@@ -838,6 +904,12 @@ function requestToPromise<T = unknown>(
     if (request.onerror === null) request.onerror = errorHandler(reject, errorDispatcher);
     if (request.onabort === null) request.onabort = () => reject(new Error('Abort'));
   });
+}
+
+function namedError(name: string, message: string) {
+  const error = new Error(message);
+  error.name = name;
+  return error;
 }
 
 function successHandler(resolve: (result: any) => void) {
