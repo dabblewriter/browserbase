@@ -55,6 +55,38 @@ export type ObjectStoreMap<T = Record<string, ObjectStore<any, IDBValidKey>>> = 
 
 interface ErrorDispatcher {
   dispatchError: (err: Error) => void;
+  /**
+   * Per-connection state the storage stall guard reads. Transaction clones share their parent's,
+   * so work on one connection can vouch for other work on the same connection.
+   */
+  storageContext: StorageContext;
+}
+
+/**
+ * Shared per-connection state for the storage stall guard.
+ */
+export interface StorageContext {
+  /** Database name. Reported alongside a stall, never embedded in the error message — see `storageTimeoutError`. */
+  dbName: string;
+  /** When anything on this connection last settled, used to tell a busy connection from a wedged one. */
+  lastSettleAt: number;
+}
+
+/**
+ * Reported when an operation is still unsettled after `Browserbase.slowTransactionTimeout`.
+ */
+export interface SlowStorageDetail {
+  dbName: string;
+  /** Stores involved, best-effort — cosmetic, and empty when the handle can no longer say. */
+  storeNames: string[];
+  /** Wall-clock milliseconds since the operation started. */
+  elapsedMs: number;
+  /**
+   * The timer fired far later than its budget, so the tab was suspended for most of `elapsedMs`
+   * and the figure is mostly frozen time rather than active work. Callers reporting durations
+   * should keep this alongside them, or the distribution is unreadable.
+   */
+  lateFire: boolean;
 }
 
 interface BrowserbaseConstructor {
@@ -126,6 +158,36 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
   static upgradeTimeout = 30000;
 
   /**
+   * Milliseconds a transaction may go unsettled before `onSlowStorage` reports it. Observation
+   * only: the operation is left running and its promise is untouched, so this is safe to enable
+   * on its own to measure what healthy storage actually costs.
+   *
+   * 0 disables it, which is the default — a library release must not start reporting on its own.
+   */
+  static slowTransactionTimeout = 0;
+
+  /**
+   * Milliseconds a transaction may go unsettled before it is abandoned: the transaction is
+   * aborted and its promise rejects with a `StorageTimeoutError`.
+   *
+   * A stalled IndexedDB transaction fires no event at all — not `complete`, not `error`, not
+   * `abort` — so without a deadline its promise never settles and the caller waits forever.
+   * That is the wedge this bounds, mirroring the guard `open()` already has.
+   *
+   * 0 disables it, which is the default. Enable it only against a measured distribution of
+   * healthy durations: a threshold below what legitimate bulk work costs converts working
+   * writes into failures, and a queued-but-healthy transaction must never be aborted for
+   * merely waiting its turn.
+   */
+  static transactionTimeout = 0;
+
+  /**
+   * Where `slowTransactionTimeout` reports go. Replace to route them at telemetry; set to null
+   * to drop them.
+   */
+  static onSlowStorage: ((detail: SlowStorageDetail) => void) | null = warnSlowStorage;
+
+  /**
    * Deletes a database by name.
    */
   static deleteDatabase(name: string) {
@@ -149,6 +211,17 @@ export class Browserbase<Stores extends ObjectStoreMap<Stores> = {}> extends Typ
   _channel: BroadcastChannel | null;
   _opening?: Promise<void>;
   _closed?: boolean = true;
+  _storageContext?: StorageContext;
+
+  /**
+   * Per-connection state for the storage stall guard. `start()` clones the Browserbase to scope a
+   * transaction, so a clone defers to its parent: every transaction on one connection shares one
+   * record, which is what lets a settling transaction vouch for a slow sibling.
+   */
+  get storageContext(): StorageContext {
+    if (this._parent) return this._parent.storageContext;
+    return (this._storageContext ??= { dbName: this.name, lastSettleAt: Date.now() });
+  }
 
   /**
    * Creates a new indexeddb database with the given name.
@@ -466,6 +539,10 @@ export class ObjectStore<Type = any, Key extends IDBValidKey = string> extends T
     this.db.dispatchError(error);
   }
 
+  get storageContext(): StorageContext {
+    return this.db.storageContext;
+  }
+
   /**
    * Get an object from the store by its primary key
    */
@@ -611,6 +688,10 @@ export class Where<Type, Key extends IDBValidKey> {
    */
   dispatchError(error: Error) {
     this.store.dispatchError(error);
+  }
+
+  get storageContext(): StorageContext {
+    return this.store.storageContext;
   }
 
   /**
@@ -880,29 +961,57 @@ function requestToPromise<T = unknown>(
   errorDispatcher?: ErrorDispatcher
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    const context: StorageContext = errorDispatcher?.storageContext ?? { dbName: '', lastSettleAt: Date.now() };
+    let guard: { clear(): void } | null = null;
+
+    // Every settle stamps the connection. It is the only evidence that tells a busy connection
+    // apart from a wedged one, and the defer window in `armStorageGuard` is built on it.
+    const settle =
+      <A>(fn: (value: A) => void) =>
+      (value: A) => {
+        context.lastSettleAt = Date.now();
+        guard?.clear();
+        fn(value);
+      };
+    const settleResolve = settle(resolve);
+    const settleReject = settle(reject);
+
     if (transaction) {
       let promise = transactionPromise.get(transaction);
       if (!promise) {
         promise = requestToPromise(transaction, null, errorDispatcher);
       }
       promise = promise.then(
-        () => resolve(request.result),
+        () => settleResolve(request.result),
         err => {
           let requestError;
           try {
             requestError = request.error;
           } catch (e) { }
-          reject(requestError || err);
+          settleReject(requestError || err);
           return Promise.reject(err);
         }
       );
       transactionPromise.set(transaction, promise);
-    } else if (request.onsuccess === null) {
-      request.onsuccess = successHandler(resolve);
+    } else {
+      // Only the transaction-less shape owns a deadline. With a transaction this promise is
+      // chained onto that transaction's own promise, which was armed when the transaction was
+      // created — arming again here would put two deadlines on one stall.
+      guard = armStorageGuard(request, context, (budgetMs, elapsedMs, lateFire) => {
+        const error = storageTimeoutError(request, context, budgetMs, elapsedMs, lateFire);
+        abortTarget(request);
+        settleReject(error);
+        // Dispatch like any other storage failure. Without this a stall is completely silent —
+        // no event fires, so nothing watching the connection can react to it at all.
+        errorDispatcher?.dispatchError(error);
+      });
+      if (request.onsuccess === null) {
+        request.onsuccess = successHandler(settleResolve);
+      }
     }
-    if (request.oncomplete === null) request.oncomplete = successHandler(resolve);
-    if (request.onerror === null) request.onerror = errorHandler(reject, errorDispatcher);
-    if (request.onabort === null) request.onabort = () => reject(new Error('Abort'));
+    if (request.oncomplete === null) request.oncomplete = successHandler(settleResolve);
+    if (request.onerror === null) request.onerror = errorHandler(settleReject, errorDispatcher);
+    if (request.onabort === null) request.onabort = () => settleReject(new Error('Abort'));
   });
 }
 
@@ -910,6 +1019,164 @@ function namedError(name: string, message: string) {
   const error = new Error(message);
   error.name = name;
   return error;
+}
+
+/**
+ * How much later than its budget a timer may fire before the delay is read as tab suspension
+ * rather than a stall. A backgrounded tab freezes timers, so a guard that wakes to find far more
+ * wall-clock elapsed than it asked for has learnt nothing about the connection: it re-arms once
+ * and gives the operation a fair window while the page is actually awake.
+ */
+const LATE_FIRE_FACTOR = 2;
+
+/**
+ * How many times a guard will defer to a demonstrably-alive connection before firing anyway.
+ * Bounded so a connection that keeps other work moving cannot postpone a genuine stall forever.
+ */
+const MAX_DEFER_WINDOWS = 30;
+
+function warnSlowStorage({ storeNames, elapsedMs }: SlowStorageDetail) {
+  const label = storeNames.length ? ` [${storeNames.join(', ')}]` : '';
+  console.warn(`IndexedDB transaction${label} still unsettled after ${elapsedMs}ms`);
+}
+
+/**
+ * Best-effort store names for a transaction or a request. Cosmetic only — a handle the browser
+ * has torn down can throw on property access, and a nameless report beats a thrown guard.
+ */
+function storeNamesOf(target: any): string[] {
+  try {
+    if (target?.objectStoreNames) return Array.from(target.objectStoreNames as DOMStringList);
+    const source = target?.source;
+    if (source?.objectStore?.name) return [source.objectStore.name];
+    if (source?.name) return [source.name];
+    if (target?.transaction?.objectStoreNames) return Array.from(target.transaction.objectStoreNames as DOMStringList);
+  } catch (e) {
+    // Fall through to no names.
+  }
+  return [];
+}
+
+/**
+ * Abandon a stalled transaction. Without this the transaction stays live and may still commit
+ * long after its caller gave up and moved on, which is worse than the stall.
+ */
+function abortTarget(target: any) {
+  try {
+    const trans = typeof target?.abort === 'function' ? target : target?.transaction;
+    if (trans && typeof trans.abort === 'function') trans.abort();
+  } catch (e) {
+    // Already finishing, or the handle is gone; either way there is nothing left to abort.
+  }
+}
+
+/**
+ * The error a stalled operation rejects with. `StorageTimeoutError` is the name @dabble/patches
+ * gives the same condition, so a consumer watching both storage paths classifies them alike.
+ *
+ * The database name is deliberately NOT in the message: names routinely embed a user id, which
+ * would hand every user a private error group in Sentry and make the class uncountable. It rides
+ * on the error as a property instead.
+ */
+function storageTimeoutError(
+  target: any,
+  context: StorageContext,
+  budgetMs: number,
+  elapsedMs: number,
+  lateFire: boolean
+) {
+  const storeNames = storeNamesOf(target);
+  const label = storeNames.length ? ` [${storeNames.join(', ')}]` : '';
+  // `budgetMs` is the deadline this operation was armed with, not the current static: the static
+  // can be changed while an operation is in flight, and a message that reported the new value
+  // would describe a deadline this transaction was never held to.
+  const error = namedError(
+    'StorageTimeoutError',
+    `IndexedDB transaction${label} did not settle within ${budgetMs}ms`
+  );
+  return Object.assign(error, { dbName: context.dbName, storeNames, elapsedMs, lateFire });
+}
+
+/**
+ * Put a deadline on an operation that may never fire an event. Returns null when both timers are
+ * disabled, which is the default — see the statics on Browserbase.
+ *
+ * Unlike @dabble/patches, whose store wrappers report every individual request settle, there is no
+ * per-request progress signal available here: when a transaction is passed to `requestToPromise`
+ * the request's promise is chained onto the transaction's, so it resolves only once the whole
+ * transaction completes. The connection-wide `lastSettleAt` is therefore the only liveness
+ * evidence, and it is what the defer window reads.
+ */
+function armStorageGuard(
+  target: any,
+  context: StorageContext,
+  onTimeout: (budgetMs: number, elapsedMs: number, lateFire: boolean) => void
+) {
+  const softBudget = Browserbase.slowTransactionTimeout;
+  const hardBudget = Browserbase.transactionTimeout;
+  if (softBudget <= 0 && hardBudget <= 0) return null;
+
+  const started = Date.now();
+  let softTimer: ReturnType<typeof setTimeout> | undefined;
+  let hardTimer: ReturnType<typeof setTimeout> | undefined;
+  let scheduledAt = started;
+  let budget = hardBudget;
+  let reArmedLate = false;
+  let deferWindows = 0;
+
+  if (softBudget > 0) {
+    softTimer = setTimeout(() => {
+      softTimer = undefined;
+      const elapsedMs = Date.now() - started;
+      Browserbase.onSlowStorage?.({
+        dbName: context.dbName,
+        storeNames: storeNamesOf(target),
+        elapsedMs,
+        lateFire: elapsedMs > softBudget * LATE_FIRE_FACTOR,
+      });
+    }, softBudget);
+  }
+
+  function scheduleHard(ms: number) {
+    scheduledAt = Date.now();
+    budget = ms;
+    hardTimer = setTimeout(fireHard, ms);
+  }
+
+  function fireHard() {
+    hardTimer = undefined;
+    const elapsedMs = Date.now() - started;
+
+    // The timer itself came back late, so the tab was suspended and this window measured nothing.
+    // Once only: a genuinely stalled transaction on a tab that keeps sleeping must still resolve.
+    if (!reArmedLate && Date.now() - scheduledAt > budget * LATE_FIRE_FACTOR) {
+      reArmedLate = true;
+      scheduleHard(hardBudget);
+      return;
+    }
+
+    // Something else on this connection settled recently, so the connection is alive and this
+    // transaction is queued behind work rather than wedged. Aborting a healthy-but-queued
+    // transaction is its own bug; wait out the remainder of a fresh window instead.
+    const silentFor = Date.now() - context.lastSettleAt;
+    if (silentFor < hardBudget && deferWindows < MAX_DEFER_WINDOWS) {
+      deferWindows++;
+      scheduleHard(hardBudget - silentFor);
+      return;
+    }
+
+    onTimeout(hardBudget, elapsedMs, reArmedLate);
+  }
+
+  if (hardBudget > 0) scheduleHard(hardBudget);
+
+  return {
+    clear() {
+      if (softTimer !== undefined) clearTimeout(softTimer);
+      if (hardTimer !== undefined) clearTimeout(hardTimer);
+      softTimer = hardTimer = undefined;
+    },
+  };
 }
 
 function successHandler(resolve: (result: any) => void) {
