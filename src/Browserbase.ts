@@ -963,13 +963,21 @@ function requestToPromise<T = unknown>(
   return new Promise((resolve, reject) => {
     const context: StorageContext = errorDispatcher?.storageContext ?? { dbName: '', lastSettleAt: Date.now() };
     let guard: { clear(): void } | null = null;
+    let timedOut = false;
 
     // Every settle stamps the connection. It is the only evidence that tells a busy connection
     // apart from a wedged one, and the defer window in `armStorageGuard` is built on it.
+    //
+    // A guard-induced rejection is the one thing that must NOT stamp: it is evidence the
+    // connection is wedged, not alive. Nor is the `abort` it provokes, which arrives here as an
+    // ordinary `onabort` moments later. Without this, N in-flight operations on a wedged
+    // connection take turns vouching for each other — every timeout re-stamps the context and the
+    // remaining stalls keep deferring, up to `MAX_DEFER_WINDOWS` each. Bounded, so never a hang,
+    // but it delays exactly the verdicts this guard exists to deliver.
     const settle =
       <A>(fn: (value: A) => void) =>
       (value: A) => {
-        context.lastSettleAt = Date.now();
+        if (!timedOut) context.lastSettleAt = Date.now();
         guard?.clear();
         fn(value);
       };
@@ -999,6 +1007,9 @@ function requestToPromise<T = unknown>(
       // created — arming again here would put two deadlines on one stall.
       guard = armStorageGuard(request, context, (budgetMs, elapsedMs, lateFire) => {
         const error = storageTimeoutError(request, context, budgetMs, elapsedMs, lateFire);
+        // Set before aborting: the abort lands back here as `onabort`, and it must not be
+        // mistaken for the connection settling either.
+        timedOut = true;
         abortTarget(request);
         settleReject(error);
         // Dispatch like any other storage failure. Without this a stall is completely silent —
@@ -1028,6 +1039,26 @@ function namedError(name: string, message: string) {
  * and gives the operation a fair window while the page is actually awake.
  */
 const LATE_FIRE_FACTOR = 2;
+
+/**
+ * Absolute floor on the overshoot before a late timer is read as suspension.
+ *
+ * The proportional bar alone is not enough once budgets get short. A deferred window is only the
+ * remainder of a budget and can be a few milliseconds, and a small configured timeout is short by
+ * construction — in both cases ordinary event-loop lag on a main thread busy with bulk IndexedDB
+ * work clears `budget * LATE_FIRE_FACTOR` easily. That would misread jitter as a suspended tab,
+ * spend the single re-arm on a full extra window, and stamp `lateFire` on an error that was
+ * measured wide awake, corrupting the very flag the duration stats are filtered by.
+ */
+const LATE_FIRE_FLOOR_MS = 500;
+
+/**
+ * Whether a timer that asked for `budgetMs` and came back `elapsedMs` later was delayed by tab
+ * suspension rather than scheduling lag. The overshoot must clear both bars — see the floor above.
+ */
+function firedLate(elapsedMs: number, budgetMs: number): boolean {
+  return elapsedMs > budgetMs * LATE_FIRE_FACTOR && elapsedMs - budgetMs > LATE_FIRE_FLOOR_MS;
+}
 
 /**
  * How many times a guard will defer to a demonstrably-alive connection before firing anyway.
@@ -1120,7 +1151,6 @@ function armStorageGuard(
   let softTimer: ReturnType<typeof setTimeout> | undefined;
   let hardTimer: ReturnType<typeof setTimeout> | undefined;
   let scheduledAt = started;
-  let budget = hardBudget;
   let reArmedLate = false;
   let deferWindows = 0;
 
@@ -1132,14 +1162,13 @@ function armStorageGuard(
         dbName: context.dbName,
         storeNames: storeNamesOf(target),
         elapsedMs,
-        lateFire: elapsedMs > softBudget * LATE_FIRE_FACTOR,
+        lateFire: firedLate(elapsedMs, softBudget),
       });
     }, softBudget);
   }
 
   function scheduleHard(ms: number) {
     scheduledAt = Date.now();
-    budget = ms;
     hardTimer = setTimeout(fireHard, ms);
   }
 
@@ -1149,7 +1178,11 @@ function armStorageGuard(
 
     // The timer itself came back late, so the tab was suspended and this window measured nothing.
     // Once only: a genuinely stalled transaction on a tab that keeps sleeping must still resolve.
-    if (!reArmedLate && Date.now() - scheduledAt > budget * LATE_FIRE_FACTOR) {
+    //
+    // Measured against the FULL budget, not the window actually scheduled — after a defer that is
+    // only the remainder of a budget, and judging lateness against a few leftover milliseconds
+    // would call every busy main thread a suspended tab.
+    if (!reArmedLate && firedLate(Date.now() - scheduledAt, hardBudget)) {
       reArmedLate = true;
       scheduleHard(hardBudget);
       return;

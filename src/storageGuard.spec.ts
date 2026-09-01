@@ -272,6 +272,62 @@ describe('Browserbase storage stall guard', () => {
     expect(trans.aborted).toBe(true);
   });
 
+  it('does not let its own timeout count as the connection settling', async () => {
+    // A guard firing is evidence the connection is WEDGED. If the rejection (or the abort it
+    // provokes, which arrives as an ordinary onabort) stamped the context, then on a connection
+    // with several in-flight operations each timeout would vouch for the rest and they would keep
+    // deferring — delaying exactly the verdicts the guard exists to deliver.
+    Browserbase.slowTransactionTimeout = 0;
+    Browserbase.transactionTimeout = 20;
+
+    const trans = stalledTransaction();
+    const db = await openWith(() => trans);
+    const scoped = db.start(['foo']);
+
+    const before = db.storageContext.lastSettleAt;
+    clockOffset = 1000; // so any stamp would be unmistakable
+    await scoped.commit().catch(() => {});
+    await delay(20); // let the abort-driven onabort land too
+
+    expect(trans.aborted).toBe(true);
+    expect(db.storageContext.lastSettleAt).toBe(before);
+  });
+
+  it('still stamps the connection when a transaction genuinely settles', async () => {
+    // The other half of the invariant above: real settles must keep vouching.
+    Browserbase.slowTransactionTimeout = 0;
+    Browserbase.transactionTimeout = 0;
+
+    const trans = stalledTransaction();
+    const db = await openWith(() => trans);
+    const scoped = db.start(['foo']);
+
+    const before = db.storageContext.lastSettleAt;
+    clockOffset = 1000;
+    trans.oncomplete({ target: trans });
+    await scoped.commit();
+
+    expect(db.storageContext.lastSettleAt).toBeGreaterThan(before);
+  });
+
+  it('does not mistake ordinary scheduling lag for a suspended tab', async () => {
+    // A deferred window is only the remainder of a budget and can be a few milliseconds, so a
+    // purely proportional bar would let event-loop jitter burn the single re-arm and stamp a
+    // wrong `lateFire` on an error measured wide awake.
+    Browserbase.slowTransactionTimeout = 0;
+    Browserbase.transactionTimeout = 25;
+
+    const db = await openWith(() => stalledTransaction());
+    const scoped = db.start(['foo']);
+
+    // Well past `budget * LATE_FIRE_FACTOR`, but nowhere near the absolute floor.
+    clockOffset = 120;
+    const error: any = await scoped.commit().catch(err => err);
+
+    expect(error.name).to.equal('StorageTimeoutError');
+    expect(error.lateFire).toBe(false);
+  });
+
   it('shares one storage context between a connection and its transaction clones', async () => {
     const db = await openWith(() => stalledTransaction());
     const scoped = db.start(['foo']);
