@@ -277,6 +277,9 @@ describe('Browserbase storage stall guard', () => {
     // provokes, which arrives as an ordinary onabort) stamped the context, then on a connection
     // with several in-flight operations each timeout would vouch for the rest and they would keep
     // deferring — delaying exactly the verdicts the guard exists to deliver.
+    //
+    // This transaction has no chained requests, so it only covers the narrow case; the test below
+    // is the one that reaches an ordinary write.
     Browserbase.slowTransactionTimeout = 0;
     Browserbase.transactionTimeout = 20;
 
@@ -290,6 +293,43 @@ describe('Browserbase storage stall guard', () => {
     await delay(20); // let the abort-driven onabort land too
 
     expect(trans.aborted).toBe(true);
+    expect(db.storageContext.lastSettleAt).toBe(before);
+  });
+
+  it('does not stamp when the stalled transaction has a request in flight', async () => {
+    // The case that matters, and the one the request-less test above cannot reach: an ordinary
+    // put/add/delete passes `store.transaction`, so it runs its OWN requestToPromise closure over
+    // the same connection. A mark held in the transaction's closure leaves this path stamping —
+    // which is every normal write.
+    Browserbase.slowTransactionTimeout = 0;
+    Browserbase.transactionTimeout = 20;
+
+    const trans = stalledTransaction();
+    // The `transaction` backref is load-bearing: without it `put()` takes the transaction-less
+    // path, arms a guard of its own, and the test passes vacuously.
+    trans.objectStore = () => ({
+      name: 'foo',
+      keyPath: 'key',
+      transaction: trans,
+      put: () => ({ onsuccess: null, onerror: null }),
+      createIndex() {},
+      deleteIndex() {},
+    });
+
+    const db = await openWith(() => trans);
+    const scoped = db.start(['foo']);
+    const writing = scoped.stores.foo.put({ key: 'a' }).catch((err: Error) => err);
+    const committing = scoped.commit().catch((err: Error) => err);
+
+    const before = db.storageContext.lastSettleAt;
+    clockOffset = 1000; // so any stamp would be unmistakable
+    const [writeErr, commitErr] = await Promise.all([writing, committing]);
+    await delay(20); // let the abort-driven handlers land
+
+    // Identity proves the write really was chained onto the transaction rather than guarding
+    // itself — the trap that would make this test vacuous.
+    expect(writeErr).toBe(commitErr);
+    expect((writeErr as Error).name).to.equal('StorageTimeoutError');
     expect(db.storageContext.lastSettleAt).toBe(before);
   });
 

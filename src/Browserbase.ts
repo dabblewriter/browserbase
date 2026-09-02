@@ -963,21 +963,29 @@ function requestToPromise<T = unknown>(
   return new Promise((resolve, reject) => {
     const context: StorageContext = errorDispatcher?.storageContext ?? { dbName: '', lastSettleAt: Date.now() };
     let guard: { clear(): void } | null = null;
-    let timedOut = false;
+    // What a settle here is evidence about. A chained request is evidence about its transaction,
+    // which is the thing that either progressed or wedged.
+    const guardedTarget: object = transaction ?? request;
 
     // Every settle stamps the connection. It is the only evidence that tells a busy connection
     // apart from a wedged one, and the defer window in `armStorageGuard` is built on it.
     //
     // A guard-induced rejection is the one thing that must NOT stamp: it is evidence the
-    // connection is wedged, not alive. Nor is the `abort` it provokes, which arrives here as an
-    // ordinary `onabort` moments later. Without this, N in-flight operations on a wedged
-    // connection take turns vouching for each other — every timeout re-stamps the context and the
-    // remaining stalls keep deferring, up to `MAX_DEFER_WINDOWS` each. Bounded, so never a hang,
-    // but it delays exactly the verdicts this guard exists to deliver.
+    // connection is wedged, not alive. Neither is the `abort` it provokes, which comes back as an
+    // ordinary `onabort` — and, in a real browser, as an `AbortError` `onerror` on every request
+    // still pending on that transaction. Without this, N in-flight operations on a wedged
+    // connection take turns vouching for each other: every timeout re-stamps the context and the
+    // remaining stalls each buy another defer window, serializing the verdicts at roughly
+    // `transactionTimeout` intervals. Bounded by `MAX_DEFER_WINDOWS`, so never a hang, but it
+    // delays exactly the verdicts this guard exists to deliver.
+    //
+    // The mark is keyed on the target rather than held in this closure because every chained
+    // request runs its OWN `requestToPromise` closure over the same transaction — a local flag
+    // would only cover a transaction with nothing in flight, and any ordinary write reopens it.
     const settle =
       <A>(fn: (value: A) => void) =>
       (value: A) => {
-        if (!timedOut) context.lastSettleAt = Date.now();
+        if (!timedOutTargets.has(guardedTarget)) context.lastSettleAt = Date.now();
         guard?.clear();
         fn(value);
       };
@@ -1007,9 +1015,10 @@ function requestToPromise<T = unknown>(
       // created — arming again here would put two deadlines on one stall.
       guard = armStorageGuard(request, context, (budgetMs, elapsedMs, lateFire) => {
         const error = storageTimeoutError(request, context, budgetMs, elapsedMs, lateFire);
-        // Set before aborting: the abort lands back here as `onabort`, and it must not be
-        // mistaken for the connection settling either.
-        timedOut = true;
+        // Marked before aborting: the abort comes back as `onabort` here and as an `AbortError`
+        // on every request still pending on this transaction, and none of that is the connection
+        // settling.
+        timedOutTargets.add(guardedTarget);
         abortTarget(request);
         settleReject(error);
         // Dispatch like any other storage failure. Without this a stall is completely silent —
@@ -1038,6 +1047,18 @@ function namedError(name: string, message: string) {
  * wall-clock elapsed than it asked for has learnt nothing about the connection: it re-arms once
  * and gives the operation a fair window while the page is actually awake.
  */
+/**
+ * Transactions (and standalone requests) whose guard has fired.
+ *
+ * Shared rather than per-closure because a stall reaches far beyond the closure that detected it:
+ * the rejection propagates into every chained request's own `requestToPromise`, and the abort
+ * fires `onerror` on each request still pending. All of those must be kept from stamping
+ * `lastSettleAt` — see the note in `requestToPromise`.
+ *
+ * Weak so a finished transaction is not retained by the bookkeeping.
+ */
+const timedOutTargets = new WeakSet<object>();
+
 const LATE_FIRE_FACTOR = 2;
 
 /**
