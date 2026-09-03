@@ -40,18 +40,57 @@ describe('Browserbase storage stall guard', () => {
   };
 
   // A transaction that accepts handlers and then never fires one — the wedge itself.
+  //
+  // `abort()` fires what a real browser fires: `onabort` on the transaction, and an `AbortError`
+  // `onerror` on every request still pending on it. Those events are the whole mechanism the
+  // stamp-suppression rules are written against, so a fake that merely set a flag would let every
+  // test asserting about them pass without exercising anything.
+  //
+  // Fired SYNCHRONOUSLY, where a browser queues them as tasks. That is deliberately stricter: code
+  // that survives the synchronous ordering survives the asynchronous one, and the difference is
+  // exactly what hid the abort-beats-rejection bug this fake surfaced.
   function stalledTransaction(names = ['foo']) {
-    return {
+    const trans: any = {
       objectStoreNames: storeNameList(names),
-      objectStore: (name: string) => ({ name, keyPath: 'key', createIndex() {}, deleteIndex() {} }),
+      // Every operation hands back a never-settling request that knows its transaction. The
+      // backref is the detail that decides which code path a read takes, so it belongs in the
+      // shared fake rather than being remembered per test.
+      objectStore: (name: string) => ({
+        name,
+        keyPath: 'key',
+        transaction: trans,
+        get: () => trans.request(),
+        getAll: () => trans.request(),
+        count: () => trans.request(),
+        put: () => trans.request(),
+        add: () => trans.request(),
+        delete: () => trans.request(),
+        createIndex() {},
+        deleteIndex() {},
+      }),
       oncomplete: null,
       onerror: null,
       onabort: null,
       aborted: false,
-      abort() {
-        this.aborted = true;
+      pending: [] as any[],
+      /** Hand out a request that never settles, tracked so abort() can fail it like a browser would. */
+      request() {
+        const req: any = { onsuccess: null, onerror: null, transaction: trans };
+        trans.pending.push(req);
+        return req;
       },
-    } as any;
+      abort() {
+        if (trans.aborted) return;
+        trans.aborted = true;
+        const abortError = Object.assign(new Error('The transaction was aborted.'), { name: 'AbortError' });
+        for (const req of trans.pending.splice(0)) {
+          req.error = abortError;
+          req.onerror?.({ target: req });
+        }
+        trans.onabort?.({ target: trans });
+      },
+    };
+    return trans;
   }
 
   // Opens a Browserbase against a hand-driven connection whose transactions the test controls.
@@ -304,18 +343,9 @@ describe('Browserbase storage stall guard', () => {
     Browserbase.slowTransactionTimeout = 0;
     Browserbase.transactionTimeout = 20;
 
+    // The fake's `transaction` backref is load-bearing here: without it `put()` would take the
+    // transaction-less path, arm a guard of its own, and the test would pass vacuously.
     const trans = stalledTransaction();
-    // The `transaction` backref is load-bearing: without it `put()` takes the transaction-less
-    // path, arms a guard of its own, and the test passes vacuously.
-    trans.objectStore = () => ({
-      name: 'foo',
-      keyPath: 'key',
-      transaction: trans,
-      put: () => ({ onsuccess: null, onerror: null }),
-      createIndex() {},
-      deleteIndex() {},
-    });
-
     const db = await openWith(() => trans);
     const scoped = db.start(['foo']);
     const writing = scoped.stores.foo.put({ key: 'a' }).catch((err: Error) => err);
@@ -326,17 +356,21 @@ describe('Browserbase storage stall guard', () => {
     const [writeErr, commitErr] = await Promise.all([writing, committing]);
     await delay(20); // let the abort-driven handlers land
 
-    // Identity proves the write really was chained onto the transaction rather than guarding
-    // itself — the trap that would make this test vacuous.
-    expect(writeErr).toBe(commitErr);
-    expect((writeErr as Error).name).to.equal('StorageTimeoutError');
+    // The transaction owns the deadline and reports the typed stall; the write is collateral,
+    // failed by the abort exactly as a browser fails a pending request. A write that had armed a
+    // guard of its own — the trap that would make this test vacuous — would carry
+    // StorageTimeoutError here instead.
+    expect((commitErr as Error).name).to.equal('StorageTimeoutError');
+    expect((writeErr as Error).name).to.equal('AbortError');
     expect(db.storageContext.lastSettleAt).toBe(before);
   });
 
   it('still stamps the connection when a transaction genuinely settles', async () => {
-    // The other half of the invariant above: real settles must keep vouching.
+    // The other half of the invariant above: real settles must keep vouching. The timeout has to
+    // be live and simply beaten — with it disabled no guard arms at all, `timedOutTargets` is
+    // never consulted, and this would pass identically with the whole mechanism removed.
     Browserbase.slowTransactionTimeout = 0;
-    Browserbase.transactionTimeout = 0;
+    Browserbase.transactionTimeout = 1000;
 
     const trans = stalledTransaction();
     const db = await openWith(() => trans);
@@ -348,6 +382,50 @@ describe('Browserbase storage stall guard', () => {
     await scoped.commit();
 
     expect(db.storageContext.lastSettleAt).toBeGreaterThan(before);
+  });
+
+  it('reports a scoped transaction once, not once per read on it', async () => {
+    // A get/getAll/count inside a start() scope is transaction-less by PARAMETER but runs on the
+    // scope's already-armed transaction. Arming again would deadline the same stall twice — and
+    // at the measurement defaults (soft on, hard off) that shows up as two slow reports for one
+    // slow transaction, double-counting the distribution this instrument exists to produce.
+    Browserbase.slowTransactionTimeout = 20;
+    Browserbase.transactionTimeout = 0;
+    const reports: any[] = [];
+    Browserbase.onSlowStorage = detail => reports.push(detail);
+
+    const trans = stalledTransaction();
+    const db = await openWith(() => trans);
+    const scoped = db.start(['foo']);
+    void scoped.stores.foo.getAll().catch(() => {});
+    void scoped.stores.foo.get('a').catch(() => {});
+    void scoped.commit().catch(() => {});
+
+    await delay(60);
+    expect(reports).to.have.length(1);
+  });
+
+  it('does not stamp when a scoped read is failed by the transaction abort', async () => {
+    // The read's own AbortError must not vouch either — it is the same stall, reported through a
+    // different closure. This is the shape dw3 uses (templateCache, accountService).
+    Browserbase.slowTransactionTimeout = 0;
+    Browserbase.transactionTimeout = 20;
+
+    const trans = stalledTransaction();
+    const db = await openWith(() => trans);
+    const scoped = db.start(['foo']);
+    const reading = scoped.stores.foo.getAll().catch((err: Error) => err);
+    const committing = scoped.commit().catch((err: Error) => err);
+
+    const before = db.storageContext.lastSettleAt;
+    clockOffset = 1000;
+    const [readErr] = await Promise.all([reading, committing]);
+    await delay(20);
+
+    expect(trans.aborted).toBe(true);
+    // The read really was failed by the abort, not by a deadline of its own.
+    expect((readErr as Error).name).to.equal('AbortError');
+    expect(db.storageContext.lastSettleAt).toBe(before);
   });
 
   it('does not mistake ordinary scheduling lag for a suspended tab', async () => {
