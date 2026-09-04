@@ -963,13 +963,35 @@ function requestToPromise<T = unknown>(
   return new Promise((resolve, reject) => {
     const context: StorageContext = errorDispatcher?.storageContext ?? { dbName: '', lastSettleAt: Date.now() };
     let guard: { clear(): void } | null = null;
+    // What a settle here is evidence about: always the transaction, which is the thing that
+    // either progressed or wedged. `request.transaction` is the middle case and easy to miss —
+    // a `get`/`getAll`/`count` inside a `start()` scope is transaction-less *by parameter* while
+    // running on the scope's shared transaction, so without the fallback it would key on its own
+    // request and the abort-driven `AbortError` would stamp. The reverse ordering has the same
+    // hole: that read's own guard aborts `request.transaction`, and every sibling then stamps
+    // because only the request was ever marked. An unscoped read has an implicit transaction of
+    // its own, and an `IDBTransaction` has no `.transaction`, so the fallback is inert elsewhere.
+    const guardedTarget: object = transaction ?? request.transaction ?? request;
 
     // Every settle stamps the connection. It is the only evidence that tells a busy connection
     // apart from a wedged one, and the defer window in `armStorageGuard` is built on it.
+    //
+    // A guard-induced rejection is the one thing that must NOT stamp: it is evidence the
+    // connection is wedged, not alive. Neither is the `abort` it provokes, which comes back as an
+    // ordinary `onabort` — and, in a real browser, as an `AbortError` `onerror` on every request
+    // still pending on that transaction. Without this, N in-flight operations on a wedged
+    // connection take turns vouching for each other: every timeout re-stamps the context and the
+    // remaining stalls each buy another defer window, serializing the verdicts at roughly
+    // `transactionTimeout` intervals. Bounded by `MAX_DEFER_WINDOWS`, so never a hang, but it
+    // delays exactly the verdicts this guard exists to deliver.
+    //
+    // The mark is keyed on the target rather than held in this closure because every chained
+    // request runs its OWN `requestToPromise` closure over the same transaction — a local flag
+    // would only cover a transaction with nothing in flight, and any ordinary write reopens it.
     const settle =
       <A>(fn: (value: A) => void) =>
       (value: A) => {
-        context.lastSettleAt = Date.now();
+        if (!timedOutTargets.has(guardedTarget)) context.lastSettleAt = Date.now();
         guard?.clear();
         fn(value);
       };
@@ -993,21 +1015,49 @@ function requestToPromise<T = unknown>(
         }
       );
       transactionPromise.set(transaction, promise);
+    } else if (guardedTransactions.has(guardedTarget)) {
+      // Already deadlined. A `get`/`getAll`/`count` inside a `start()` scope reaches this branch —
+      // transaction-less by parameter — but runs on a transaction `start()` already armed, so
+      // arming here really would put two deadlines on one stall: two soft reports for one slow
+      // transaction (double-counting the very distribution this instrument exists to measure),
+      // and a second, later hard deadline whose `abortTarget` walks to the shared transaction and
+      // can kill it after the transaction's own guard has decided to defer. That second timer is
+      // request-scoped while its abort is transaction-wide, which is the asymmetry that makes it
+      // wrong rather than merely redundant.
+      //
+      // Skipping is safe: the transaction's guard still fires, aborts, and the resulting
+      // `AbortError` reaches this request's `onerror` below, so the read rejects rather than
+      // hanging.
     } else {
-      // Only the transaction-less shape owns a deadline. With a transaction this promise is
-      // chained onto that transaction's own promise, which was armed when the transaction was
-      // created — arming again here would put two deadlines on one stall.
+      // This transaction has no deadline yet, so this closure owns it. Registered before arming
+      // so a read issued later on the same transaction takes the branch above.
+      guardedTransactions.add(guardedTarget);
       guard = armStorageGuard(request, context, (budgetMs, elapsedMs, lateFire) => {
         const error = storageTimeoutError(request, context, budgetMs, elapsedMs, lateFire);
-        abortTarget(request);
+        // Order matters, twice over.
+        //
+        // Marked first: the abort comes back as `onabort` here and as an `AbortError` on every
+        // request still pending on this transaction, and none of that is the connection settling.
+        //
+        // Rejected before aborting: `onabort` rejects with a bare `Error('Abort')`, so whichever
+        // of the two lands first is the error the caller sees. Browsers fire the abort event
+        // asynchronously, which is the only reason rejecting afterwards ever produced the typed
+        // error — a synchronous abort would silently downgrade every stall to `Abort` and cost
+        // callers the `StorageTimeoutError` they classify on. Settling first makes the outcome
+        // the same either way.
+        timedOutTargets.add(guardedTarget);
         settleReject(error);
+        abortTarget(request);
         // Dispatch like any other storage failure. Without this a stall is completely silent —
         // no event fires, so nothing watching the connection can react to it at all.
         errorDispatcher?.dispatchError(error);
       });
-      if (request.onsuccess === null) {
-        request.onsuccess = successHandler(settleResolve);
-      }
+    }
+
+    // Both transaction-less paths settle on the request's own events, armed or not — a skipped
+    // guard must not cost the read its resolution.
+    if (!transaction && request.onsuccess === null) {
+      request.onsuccess = successHandler(settleResolve);
     }
     if (request.oncomplete === null) request.oncomplete = successHandler(settleResolve);
     if (request.onerror === null) request.onerror = errorHandler(settleReject, errorDispatcher);
@@ -1022,12 +1072,52 @@ function namedError(name: string, message: string) {
 }
 
 /**
+ * Transactions (and standalone requests) whose guard has fired.
+ *
+ * Shared rather than per-closure because a stall reaches far beyond the closure that detected it:
+ * the rejection propagates into every chained request's own `requestToPromise`, and the abort
+ * fires `onerror` on each request still pending. All of those must be kept from stamping
+ * `lastSettleAt` — see the note in `requestToPromise`.
+ *
+ * Weak so a finished transaction is not retained by the bookkeeping.
+ */
+const timedOutTargets = new WeakSet<object>();
+
+/**
+ * Transactions that already carry a deadline, so a later request on the same transaction does not
+ * arm a second one. See the skip branch in `requestToPromise` for why two is worse than one.
+ *
+ * Weak for the same reason as above.
+ */
+const guardedTransactions = new WeakSet<object>();
+
+/**
  * How much later than its budget a timer may fire before the delay is read as tab suspension
  * rather than a stall. A backgrounded tab freezes timers, so a guard that wakes to find far more
  * wall-clock elapsed than it asked for has learnt nothing about the connection: it re-arms once
  * and gives the operation a fair window while the page is actually awake.
  */
 const LATE_FIRE_FACTOR = 2;
+
+/**
+ * Absolute floor on the overshoot before a late timer is read as suspension.
+ *
+ * The proportional bar alone is not enough once budgets get short. A deferred window is only the
+ * remainder of a budget and can be a few milliseconds, and a small configured timeout is short by
+ * construction — in both cases ordinary event-loop lag on a main thread busy with bulk IndexedDB
+ * work clears `budget * LATE_FIRE_FACTOR` easily. That would misread jitter as a suspended tab,
+ * spend the single re-arm on a full extra window, and stamp `lateFire` on an error that was
+ * measured wide awake, corrupting the very flag the duration stats are filtered by.
+ */
+const LATE_FIRE_FLOOR_MS = 500;
+
+/**
+ * Whether a timer that asked for `budgetMs` and came back `elapsedMs` later was delayed by tab
+ * suspension rather than scheduling lag. The overshoot must clear both bars — see the floor above.
+ */
+function firedLate(elapsedMs: number, budgetMs: number): boolean {
+  return elapsedMs > budgetMs * LATE_FIRE_FACTOR && elapsedMs - budgetMs > LATE_FIRE_FLOOR_MS;
+}
 
 /**
  * How many times a guard will defer to a demonstrably-alive connection before firing anyway.
@@ -1120,7 +1210,6 @@ function armStorageGuard(
   let softTimer: ReturnType<typeof setTimeout> | undefined;
   let hardTimer: ReturnType<typeof setTimeout> | undefined;
   let scheduledAt = started;
-  let budget = hardBudget;
   let reArmedLate = false;
   let deferWindows = 0;
 
@@ -1132,14 +1221,13 @@ function armStorageGuard(
         dbName: context.dbName,
         storeNames: storeNamesOf(target),
         elapsedMs,
-        lateFire: elapsedMs > softBudget * LATE_FIRE_FACTOR,
+        lateFire: firedLate(elapsedMs, softBudget),
       });
     }, softBudget);
   }
 
   function scheduleHard(ms: number) {
     scheduledAt = Date.now();
-    budget = ms;
     hardTimer = setTimeout(fireHard, ms);
   }
 
@@ -1149,7 +1237,11 @@ function armStorageGuard(
 
     // The timer itself came back late, so the tab was suspended and this window measured nothing.
     // Once only: a genuinely stalled transaction on a tab that keeps sleeping must still resolve.
-    if (!reArmedLate && Date.now() - scheduledAt > budget * LATE_FIRE_FACTOR) {
+    //
+    // Measured against the FULL budget, not the window actually scheduled — after a defer that is
+    // only the remainder of a budget, and judging lateness against a few leftover milliseconds
+    // would call every busy main thread a suspended tab.
+    if (!reArmedLate && firedLate(Date.now() - scheduledAt, hardBudget)) {
       reArmedLate = true;
       scheduleHard(hardBudget);
       return;
