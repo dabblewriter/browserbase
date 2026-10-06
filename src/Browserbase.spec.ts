@@ -680,6 +680,39 @@ describe('Browserbase open lifecycle guards', () => {
     expect(error.message).toContain('null-error-db');
   });
 
+  it('should dispatch a failed reopen after an abnormal close as an error, not leave it unhandled', async () => {
+    const request = stubOpen();
+    const db = newDb();
+    db.version(1, { foo: 'key' });
+
+    const opening = db.open();
+    const opened = fakeDatabase();
+    request.result = opened;
+    request.onsuccess();
+    await opening;
+
+    const errors: unknown[] = [];
+    let recreated = false;
+    db.addEventListener('error', event => errors.push((event as ErrorEvent).error));
+    db.addEventListener('recreated', () => (recreated = true));
+
+    // The browser closes the connection under us (iOS reclaiming a backgrounded page) and the
+    // reopen lands on a connection that is already closing again.
+    const reopenRequest = stubOpen();
+    const closing = new DOMException('The database connection is closing.', 'InvalidStateError');
+    const reopened = fakeDatabase();
+    reopened.transaction = () => {
+      throw closing;
+    };
+    const closeHandled = opened.onclose();
+    reopenRequest.result = reopened;
+    reopenRequest.onsuccess();
+
+    await expect(closeHandled).resolves.toBeUndefined();
+    expect(errors).toEqual([closing]);
+    expect(recreated).toBe(false);
+  });
+
   it('should return the same promise when open is called twice concurrently', async () => {
     const open = vi.spyOn(indexedDB, 'open');
     const db = newDb();

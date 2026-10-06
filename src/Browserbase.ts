@@ -1375,11 +1375,18 @@ function onOpen(browserbase: Browserbase) {
     }
   };
   db.onclose = async () => {
-    if (!browserbase._closed) {
-      delete browserbase._opening;
+    if (browserbase._closed) return;
+    delete browserbase._opening;
+    try {
       await browserbase.open();
-      browserbase.dispatchEvent(new Event('recreated'));
+    } catch (error) {
+      // Nothing awaits this handler, so a failed reopen (e.g. the new connection is already closing
+      // again) would surface as an unhandled rejection the app never sees. Report it on the same
+      // `error` event transaction failures use, so a listener can retry the open.
+      browserbase.dispatchEvent(new ErrorEvent('error', { error }));
+      return;
     }
+    browserbase.dispatchEvent(new Event('recreated'));
   };
   db.onerror = event => browserbase.dispatchEvent(new ErrorEvent('error', { error: (event.target as any).error }));
   if (!browserbase.options.dontDispatch) {
